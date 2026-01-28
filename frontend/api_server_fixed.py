@@ -234,7 +234,195 @@ async def list_server_files():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/auth/register")
+@app.get("/init-db")
+async def init_database():
+    """Initialize database tables"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Create users table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create other required tables
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_links (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    link_id VARCHAR(255) UNIQUE NOT NULL,
+                    link_type VARCHAR(50) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS link_access_controls (
+                    id SERIAL PRIMARY KEY,
+                    link_id VARCHAR(255) UNIQUE NOT NULL,
+                    max_downloads INTEGER DEFAULT 10,
+                    custom_expires_at TIMESTAMP,
+                    is_revoked BOOLEAN DEFAULT FALSE,
+                    password_hash VARCHAR(255)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS access_attempts (
+                    id SERIAL PRIMARY KEY,
+                    link_id VARCHAR(255) NOT NULL,
+                    ip_address VARCHAR(45),
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    access_type VARCHAR(50),
+                    success BOOLEAN,
+                    risk_score FLOAT,
+                    user_name VARCHAR(255)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS security_alerts (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    alert_type VARCHAR(100),
+                    severity VARCHAR(50),
+                    message TEXT,
+                    link_id VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audit_events (
+                    id SERIAL PRIMARY KEY,
+                    event_type VARCHAR(100),
+                    link_id VARCHAR(255),
+                    ip_address VARCHAR(45),
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    success BOOLEAN,
+                    metadata JSONB
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS login_attempts (
+                    id SERIAL PRIMARY KEY,
+                    email VARCHAR(255),
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    success BOOLEAN,
+                    ip_address VARCHAR(45)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_sessions (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    session_id VARCHAR(255) UNIQUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    user_agent TEXT,
+                    device_fingerprint VARCHAR(255),
+                    ip_address VARCHAR(45)
+                )
+            """)
+            
+            conn.commit()
+            
+            return {"message": "Database initialized successfully"}
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    import os
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)_access_controls (
+                    id SERIAL PRIMARY KEY,
+                    link_id VARCHAR(255) UNIQUE NOT NULL,
+                    max_downloads INTEGER DEFAULT 10,
+                    custom_expires_at TIMESTAMP,
+                    is_revoked BOOLEAN DEFAULT FALSE,
+                    password_hash VARCHAR(255)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS access_attempts (
+                    id SERIAL PRIMARY KEY,
+                    link_id VARCHAR(255) NOT NULL,
+                    ip_address VARCHAR(45),
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    access_type VARCHAR(50),
+                    success BOOLEAN,
+                    risk_score FLOAT,
+                    user_name VARCHAR(255)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS security_alerts (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    alert_type VARCHAR(100),
+                    severity VARCHAR(50),
+                    message TEXT,
+                    link_id VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audit_events (
+                    id SERIAL PRIMARY KEY,
+                    event_type VARCHAR(100),
+                    link_id VARCHAR(255),
+                    ip_address VARCHAR(45),
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    success BOOLEAN,
+                    metadata JSONB
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS login_attempts (
+                    id SERIAL PRIMARY KEY,
+                    email VARCHAR(255),
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    success BOOLEAN,
+                    ip_address VARCHAR(45)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_sessions (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    session_id VARCHAR(255) UNIQUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    user_agent TEXT,
+                    device_fingerprint VARCHAR(255),
+                    ip_address VARCHAR(45)
+                )
+            """)
+            
+            conn.commit()
+            
+            return {"message": "Database initialized successfully"}
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 async def register(email: str = Form(...), password: str = Form(...)):
     """Register new user"""
     try:
