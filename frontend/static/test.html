@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>BlindSend Test</title>
+</head>
+<body>
+    <h1>🔐 BlindSend - Quick Test</h1>
+    
+    <h2>Simple File Upload</h2>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" required>
+        <button type="submit">Upload</button>
+    </form>
+    
+    <h2>API Status</h2>
+    <button onclick="checkStatus()">Check AI Status</button>
+    <div id="status"></div>
+    
+    <script>
+        async function checkStatus() {
+            try {
+                const response = await fetch('/api/ai/status');
+                const data = await response.json();
+                document.getElementById('status').innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+            } catch (error) {
+                document.getElementById('status').innerHTML = 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>

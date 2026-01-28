@@ -8,7 +8,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
-import psycopg
+import psycopg2 as psycopg
 import bcrypt
 import jwt
 import uuid
@@ -20,7 +20,31 @@ import sys
 
 # Add AI security path
 sys.path.append('ai_security')
-from config import DB_CONFIG
+sys.path.append('../ai_security')
+try:
+    from config import DB_CONFIG
+    # Fix database config for psycopg2
+    if 'dbname' in DB_CONFIG:
+        DB_CONFIG['database'] = DB_CONFIG.pop('dbname')
+except ImportError:
+    # Fallback database config
+    DB_CONFIG = {
+        'host': 'localhost',
+        'port': 5432,
+        'database': 'blindsend_test',
+        'user': 'postgres',
+        'password': 'Swapnika2608'
+    }
+# AI imports
+try:
+    from ai_security_engine import AISecurityEngine
+    from feature_engineering import FeatureEngineer
+    from risk_scoring import RiskScorer
+    from anomaly_detection import AnomalyDetector
+    AI_IMPORTS_AVAILABLE = True
+except ImportError as e:
+    print(f"AI imports failed: {e}")
+    AI_IMPORTS_AVAILABLE = False
 
 import smtplib
 from email.mime.text import MIMEText
@@ -101,6 +125,19 @@ def get_location_from_ip(ip_address: str) -> str:
 app = FastAPI(title="AI Enhanced Secure File Sharing API", version="1.0.0")
 security = HTTPBearer()
 
+# Initialize AI Security Engine
+ai_engine = None
+if AI_IMPORTS_AVAILABLE:
+    try:
+        # Ensure models directory exists
+        os.makedirs("models", exist_ok=True)
+        ai_engine = AISecurityEngine(DB_CONFIG)
+        print("AI Security Engine initialized successfully")
+    except Exception as e:
+        print(f"AI Security Engine initialization failed: {e}")
+else:
+    print("AI Security Engine disabled - imports not available")
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -111,12 +148,12 @@ app.add_middleware(
 )
 
 # Serve static files
-app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/favicon.ico")
 async def favicon():
     """Serve favicon"""
-    return FileResponse("frontend/favicon.ico")
+    return FileResponse("favicon.ico")
 
 # JWT settings
 JWT_SECRET = "your-secret-key-change-in-production"
@@ -124,7 +161,16 @@ JWT_ALGORITHM = "HS256"
 
 def get_db():
     """Database connection"""
-    return psycopg.connect(**DB_CONFIG)
+    try:
+        # Convert dbname to database for psycopg2
+        db_config = DB_CONFIG.copy()
+        if 'dbname' in db_config:
+            db_config['database'] = db_config.pop('dbname')
+        return psycopg.connect(**db_config)
+    except Exception as e:
+        print(f"Database connection failed: {e}")
+        # Return a mock connection for development
+        return None
 
 def create_jwt_token(user_id: int, email: str) -> str:
     """Create JWT token for user"""
@@ -149,15 +195,28 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 async def home():
     """Serve main page"""
     try:
-        with open("frontend/static/index.html", "r", encoding="utf-8") as f:
+        with open("static/index.html", "r", encoding="utf-8") as f:
             return HTMLResponse(f.read())
     except FileNotFoundError:
         return HTMLResponse("""
-        <html><body>
+        <!DOCTYPE html>
+        <html><head><title>BlindSend</title></head><body>
         <h1>🔐 BlindSend - End-to-End Encrypted File Sharing</h1>
+        <p>Server is running successfully!</p>
         <p>Main application not found. Please ensure static/index.html exists.</p>
+        <p><a href="/admin/files">View uploaded files</a></p>
+        <p><a href="/init-db">Initialize database</a></p>
         </body></html>
         """)
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "message": "BlindSend API is running",
+        "ai_engine": "disabled" if not ai_engine else "enabled"
+    }
 
 @app.post("/upload")
 async def upload_file_simple(file: UploadFile = File(...)):
@@ -188,21 +247,32 @@ async def upload_file_simple(file: UploadFile = File(...)):
 async def download_page(file_id: str):
     """Serve download page with decryption capability"""
     try:
-        with open("frontend/static/download.html", "r", encoding="utf-8") as f:
+        with open("static/download.html", "r", encoding="utf-8") as f:
             return HTMLResponse(f.read())
     except FileNotFoundError:
         return HTMLResponse(f"""
-        <html><body>
+        <!DOCTYPE html>
+        <html><head><title>BlindSend Download</title></head><body style="font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px;">
         <h1>🔒 BlindSend - Encrypted File Download</h1>
         <p>File ID: {file_id}</p>
-        <p>This file is encrypted. You need the decryption key to access it.</p>
-        <form method="get" action="/api/files/download/{file_id}">
-            <label>Your Name:</label>
-            <input type="text" name="user_name" required><br><br>
-            <label>File Password (if required):</label>
-            <input type="password" name="password"><br><br>
-            <button type="submit">Download Encrypted File</button>
+        <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <strong>⚠️ This file is encrypted.</strong><br>
+            You need both the decryption key and password (if set) to access it.
+        </div>
+        <form method="get" action="/api/files/download/{file_id}" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Your Name:</label>
+                <input type="text" name="user_name" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: bold;">File Password (if required):</label>
+                <input type="password" name="password" placeholder="Leave empty if no password" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <button type="submit" style="background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; width: 100%;">Download Encrypted File</button>
         </form>
+        <div style="background: #e7f3ff; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #007bff;">
+            <strong>📝 Note:</strong> This will download the encrypted file. You'll need the decryption key (provided separately) to decrypt it on your device.
+        </div>
         </body></html>
         """)
 
@@ -238,7 +308,11 @@ async def list_server_files():
 async def init_database():
     """Initialize database tables"""
     try:
-        with get_db() as conn:
+        conn = get_db()
+        if not conn:
+            return {"error": "Database connection failed", "message": "Please check your database configuration"}
+            
+        with conn:
             cursor = conn.cursor()
             
             # Create users table
@@ -337,92 +411,12 @@ async def init_database():
             
             conn.commit()
             
-            return {"message": "Database initialized successfully"}
+            return {"message": "Database initialized successfully", "status": "success"}
             
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"error": f"Database initialization failed: {str(e)}", "status": "failed"}
 
-if __name__ == "__main__":
-    import uvicorn
-    import os
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)_access_controls (
-                    id SERIAL PRIMARY KEY,
-                    link_id VARCHAR(255) UNIQUE NOT NULL,
-                    max_downloads INTEGER DEFAULT 10,
-                    custom_expires_at TIMESTAMP,
-                    is_revoked BOOLEAN DEFAULT FALSE,
-                    password_hash VARCHAR(255)
-                )
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS access_attempts (
-                    id SERIAL PRIMARY KEY,
-                    link_id VARCHAR(255) NOT NULL,
-                    ip_address VARCHAR(45),
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    access_type VARCHAR(50),
-                    success BOOLEAN,
-                    risk_score FLOAT,
-                    user_name VARCHAR(255)
-                )
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS security_alerts (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER REFERENCES users(id),
-                    alert_type VARCHAR(100),
-                    severity VARCHAR(50),
-                    message TEXT,
-                    link_id VARCHAR(255),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS audit_events (
-                    id SERIAL PRIMARY KEY,
-                    event_type VARCHAR(100),
-                    link_id VARCHAR(255),
-                    ip_address VARCHAR(45),
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    success BOOLEAN,
-                    metadata JSONB
-                )
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS login_attempts (
-                    id SERIAL PRIMARY KEY,
-                    email VARCHAR(255),
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    success BOOLEAN,
-                    ip_address VARCHAR(45)
-                )
-            """)
-            
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS user_sessions (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER REFERENCES users(id),
-                    session_id VARCHAR(255) UNIQUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    user_agent TEXT,
-                    device_fingerprint VARCHAR(255),
-                    ip_address VARCHAR(45)
-                )
-            """)
-            
-            conn.commit()
-            
-            return {"message": "Database initialized successfully"}
-            
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.post("/api/auth/register")
 async def register(email: str = Form(...), password: str = Form(...)):
     """Register new user"""
     try:
@@ -509,14 +503,10 @@ async def upload_file(
 ):
     """Upload file with security controls"""
     try:
-        # Create upload directory
         os.makedirs("uploads", exist_ok=True)
-        
-        # Generate unique link ID
         link_id = str(uuid.uuid4())
         file_path = f"uploads/{link_id}_{file.filename}"
         
-        # Save file
         with open(file_path, "wb") as f:
             content = await file.read()
             f.write(content)
@@ -524,13 +514,11 @@ async def upload_file(
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # Create user_links entry
             cursor.execute("""
                 INSERT INTO user_links (user_id, link_id, link_type, created_at)
                 VALUES (%s, %s, %s, %s)
             """, (user_data["user_id"], link_id, 'file_share', datetime.now()))
             
-            # Create access controls
             expires_at = datetime.now() + timedelta(hours=expires_hours)
             password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode() if password else None
             cursor.execute("""
@@ -538,7 +526,6 @@ async def upload_file(
                 VALUES (%s, %s, %s, %s, %s)
             """, (link_id, max_downloads, expires_at, False, password_hash))
             
-            # Log upload event
             cursor.execute("""
                 INSERT INTO audit_events (event_type, link_id, ip_address, timestamp, success, metadata)
                 VALUES (%s, %s, %s, %s, %s, %s)
@@ -564,27 +551,6 @@ async def upload_file(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/download/{link_id}", response_class=HTMLResponse)
-async def download_page(link_id: str):
-    """Serve download page with password protection"""
-    try:
-        with open("static/download.html", "r", encoding="utf-8") as f:
-            return HTMLResponse(f.read())
-    except FileNotFoundError:
-        return HTMLResponse(f"""
-        <html><body>
-        <h1>🔒 AI Enhanced Secure File Sharing System</h1>
-        <p>File ID: {link_id}</p>
-        <form method="get" action="/api/files/download/{link_id}">
-            <label>Your Name (Optional):</label>
-            <input type="text" name="user_name" placeholder="Enter your name">
-            <label>Access Key:</label>
-            <input type="password" name="password" required>
-            <button type="submit">Download</button>
-        </form>
-        </body></html>
-        """)
-
 @app.get("/api/files/download/{link_id}")
 async def download_file(link_id: str, request: Request, password: Optional[str] = None, user_name: Optional[str] = None):
     """Download file with access monitoring"""
@@ -596,7 +562,6 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # Check access controls
             cursor.execute("""
                 SELECT lac.max_downloads, lac.custom_expires_at, lac.is_revoked, lac.password_hash,
                        COUNT(CASE WHEN aa.success = true THEN 1 END) as download_count
@@ -612,89 +577,91 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
             
             max_downloads, expires_at, is_revoked, password_hash, download_count = result
             
-            # Check password if required
-            if password_hash:
-                if not password:
-                    # Log failed attempt
-                    cursor.execute("""
-                        INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """, (link_id, client_ip, datetime.now(), "download", False, 0.8, user_name))
-                    conn.commit()
-                    raise HTTPException(status_code=401, detail="Password required")
-                if not bcrypt.checkpw(password.encode(), password_hash.encode()):
-                    # Log failed attempt
-                    cursor.execute("""
-                        INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """, (link_id, client_ip, datetime.now(), "download", False, 0.8, user_name))
-                    
-                    # Check for multiple failed attempts and create security alert
-                    cursor.execute("""
-                        SELECT COUNT(*) FROM access_attempts 
-                        WHERE link_id = %s AND user_name = %s AND success = false 
-                        AND timestamp > NOW() - INTERVAL '1 hour'
-                    """, (link_id, user_name))
-                    
-                    failed_count = cursor.fetchone()[0]
-                    if failed_count > 3:
-                        # Get file owner
-                        cursor.execute("""
-                            SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s
-                        """, (link_id,))
-                        owner_result = cursor.fetchone()
-                        
-                        if owner_result:
-                            owner_id = owner_result[0]
-                            
-                            # Get owner email
-                            cursor.execute("SELECT email FROM users WHERE id = %s", (owner_id,))
-                            owner_email_result = cursor.fetchone()
-                            
-                            if owner_email_result:
-                                owner_email = owner_email_result[0]
-                                alert_msg = f"User '{user_name}' made {failed_count} failed password attempts on your file"
-                                
-                                # Create security alert
-                                cursor.execute("""
-                                    INSERT INTO security_alerts (user_id, alert_type, severity, message, link_id, created_at)
-                                    VALUES (%s, %s, %s, %s, %s, %s)
-                                """, (
-                                    owner_id, 
-                                    "suspicious_access", 
-                                    "medium",
-                                    alert_msg,
-                                    link_id,
-                                    datetime.now()
-                                ))
-                                
-                                # Send email notification
-                                send_security_alert_email(owner_email, alert_msg, link_id)
-                    
-                    conn.commit()
-                    raise HTTPException(status_code=401, detail="Invalid password")
+            if password_hash and (not password or not bcrypt.checkpw(password.encode(), password_hash.encode())):
+                cursor.execute("""
+                    INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (link_id, client_ip, datetime.now(), "download", False, 0.8, user_name))
+                conn.commit()
+                raise HTTPException(status_code=401, detail="Invalid password")
             
-            # Check if revoked
             if is_revoked:
                 raise HTTPException(status_code=403, detail="Access revoked")
             
-            # Check expiration
             if expires_at and datetime.now() > expires_at:
                 raise HTTPException(status_code=403, detail="Link expired")
             
-            # Check download limit
             if download_count >= max_downloads:
                 raise HTTPException(status_code=403, detail="Download limit exceeded")
             
-            # Log access attempt with user name
+            # Check for multiple failed attempts and create security alert
+            if password_hash and password and not bcrypt.checkpw(password.encode(), password_hash.encode()):
+                cursor.execute("""
+                    SELECT COUNT(*) FROM access_attempts 
+                    WHERE link_id = %s AND user_name = %s AND success = false 
+                    AND timestamp > NOW() - INTERVAL '1 hour'
+                """, (link_id, user_name))
+                
+                failed_count = cursor.fetchone()[0]
+                if failed_count > 3:
+                    # Get file owner
+                    cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
+                    owner_result = cursor.fetchone()
+                    
+                    if owner_result:
+                        owner_id = owner_result[0]
+                        cursor.execute("SELECT email FROM users WHERE id = %s", (owner_id,))
+                        owner_email_result = cursor.fetchone()
+                        
+                        if owner_email_result:
+                            owner_email = owner_email_result[0]
+                            alert_msg = f"User '{user_name}' made {failed_count} failed password attempts on your file"
+                            
+                            cursor.execute("""
+                                INSERT INTO security_alerts (user_id, alert_type, severity, message, link_id, created_at)
+                                VALUES (%s, %s, %s, %s, %s, %s)
+                            """, (owner_id, "suspicious_access", "medium", alert_msg, link_id, datetime.now()))
+                            
+                            send_security_alert_email(owner_email, alert_msg, link_id)
+            
             cursor.execute("""
                 INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (link_id, client_ip, datetime.now(), "download", True, 0.1, user_name))
             
+            # AI-powered risk assessment
+            if ai_engine and ai_engine.models_trained:
+                try:
+                    # Get file owner for risk assessment
+                    cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
+                    owner_result = cursor.fetchone()
+                    
+                    if owner_result:
+                        owner_id = owner_result[0]
+                        
+                        # Perform AI risk assessment
+                        risk_assessment = ai_engine.assess_single_user(
+                            user_id=owner_id,
+                            context={
+                                'download_ip': client_ip,
+                                'download_user': user_name,
+                                'link_id': link_id,
+                                'access_time': datetime.now().isoformat()
+                            }
+                        )
+                        
+                        if risk_assessment and risk_assessment['risk_level'] in ['high', 'critical']:
+                            # Generate automated security responses
+                            responses = ai_engine.response_system.process_threat_detection(risk_assessment)
+                            ai_engine.response_system.execute_responses(responses)
+                            
+                            print(f"HIGH-RISK download detected for user {owner_id}: {risk_assessment['risk_level']}")
+                            
+                except Exception as e:
+                    print(f"AI risk assessment failed: {e}")
+            
             conn.commit()
             
-            # Find file
             for filename in os.listdir("uploads"):
                 if filename.startswith(f"{link_id}_"):
                     return FileResponse(f"uploads/{filename}", filename=filename.split("_", 1)[1])
@@ -708,25 +675,17 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
 
 @app.post("/api/files/revoke/{link_id}")
 async def revoke_access(link_id: str, user_data: dict = Depends(verify_token)):
-    """Instantly revoke access to a file"""
+    """Revoke access to a file"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # Check if user owns this link
-            cursor.execute("""
-                SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s
-            """, (link_id,))
-            
+            cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
             result = cursor.fetchone()
             if not result or result[0] != user_data["user_id"]:
                 raise HTTPException(status_code=403, detail="Not authorized")
             
-            # Revoke access
-            cursor.execute("""
-                UPDATE link_access_controls SET is_revoked = true WHERE link_id = %s
-            """, (link_id,))
-            
+            cursor.execute("UPDATE link_access_controls SET is_revoked = true WHERE link_id = %s", (link_id,))
             conn.commit()
             return {"message": "Access revoked successfully"}
             
@@ -743,7 +702,7 @@ async def get_user_activity(
     file_limit: int = 10,
     user_data: dict = Depends(verify_token)
 ):
-    """Get user activity with pagination"""
+    """Get user activity with full pagination and analytics"""
     try:
         offset = (page - 1) * limit
         
@@ -946,8 +905,194 @@ async def get_user_activity(
             "analytics": {}
         }
 
+@app.get("/api/ai/security-dashboard")
+async def ai_security_dashboard(user_data: dict = Depends(verify_token)):
+    """AI-powered security dashboard with threat analysis"""
+    try:
+        if not ai_engine:
+            raise HTTPException(status_code=503, detail="AI Security Engine not available")
+        
+        # Get AI risk assessment for user
+        risk_assessment = ai_engine.assess_single_user(user_data["user_id"])
+        
+        # Get system-wide security report
+        security_report = ai_engine.generate_security_report(hours_back=24)
+        
+        # Get AI system status
+        ai_status = ai_engine.get_system_status()
+        
+        return {
+            "user_risk_assessment": risk_assessment,
+            "system_security_report": security_report,
+            "ai_system_status": ai_status,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI dashboard error: {str(e)}")
+
+@app.post("/api/ai/initialize")
+@app.get("/api/ai/initialize")
+async def initialize_ai_system(retrain_models: bool = False):
+    """Initialize or retrain AI security models"""
+    try:
+        global ai_engine
+        
+        if not AI_IMPORTS_AVAILABLE:
+            return {"error": "AI components not available", "status": "failed"}
+        
+        if not ai_engine:
+            ai_engine = AISecurityEngine(DB_CONFIG)
+        
+        # Initialize the AI system
+        success = ai_engine.initialize_system(retrain_models=retrain_models)
+        
+        if success:
+            # Start monitoring if not already running
+            if not ai_engine.is_running:
+                ai_engine.start_monitoring()
+            
+            return {
+                "message": "AI Security Engine initialized successfully",
+                "models_trained": ai_engine.models_trained,
+                "monitoring_active": ai_engine.is_running,
+                "system_status": ai_engine.get_system_status()
+            }
+        else:
+            return {"error": "Failed to initialize AI system", "status": "failed"}
+            
+    except Exception as e:
+        return {"error": f"AI initialization error: {str(e)}", "status": "failed"}
+
+@app.get("/api/ai/status")
+async def ai_status():
+    """Get AI system status"""
+    return {
+        "ai_imports_available": AI_IMPORTS_AVAILABLE,
+        "ai_engine_initialized": ai_engine is not None,
+        "models_trained": ai_engine.models_trained if ai_engine else False,
+        "monitoring_active": ai_engine.is_running if ai_engine else False,
+        "system_status": ai_engine.get_system_status() if ai_engine else None
+    }
+
+@app.get("/api/ai/threat-analysis/{user_id}")
+async def get_user_threat_analysis(user_id: int, admin_data: dict = Depends(verify_token)):
+    """Get detailed AI threat analysis for a specific user (admin only)"""
+    try:
+        if not ai_engine or not ai_engine.models_trained:
+            raise HTTPException(status_code=503, detail="AI Security Engine not ready")
+        
+        # Perform comprehensive threat analysis
+        risk_assessment = ai_engine.assess_single_user(user_id)
+        
+        if not risk_assessment:
+            raise HTTPException(status_code=404, detail="User not found or insufficient data")
+        
+        return {
+            "user_id": user_id,
+            "threat_analysis": risk_assessment,
+            "analysis_timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Threat analysis error: {str(e)}")
+            
+        cursor.execute("""
+                INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (link_id, client_ip, datetime.now(), "download", True, 0.1, user_name))
+            
+        conn.commit()
+            
+        for filename in os.listdir("uploads"):
+                if filename.startswith(f"{link_id}_"):
+                    return FileResponse(f"uploads/{filename}", filename=filename.split("_", 1)[1])
+            
+        raise HTTPException(status_code=404, detail="File not found on disk")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/files/revoke/{link_id}")
+async def revoke_access(link_id: str, user_data: dict = Depends(verify_token)):
+    """Revoke access to a file"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
+            result = cursor.fetchone()
+            if not result or result[0] != user_data["user_id"]:
+                raise HTTPException(status_code=403, detail="Not authorized")
+            
+            cursor.execute("UPDATE link_access_controls SET is_revoked = true WHERE link_id = %s", (link_id,))
+            conn.commit()
+            return {"message": "Access revoked successfully"}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/user/activity")
+async def get_user_activity(user_data: dict = Depends(verify_token)):
+    """Get user activity"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT ae.timestamp, ae.metadata, ae.link_id
+                FROM audit_events ae
+                WHERE ae.link_id IN (
+                    SELECT ul.link_id FROM user_links ul WHERE ul.user_id = %s
+                ) AND ae.event_type = 'file_upload'
+                ORDER BY ae.timestamp DESC LIMIT 10
+            """, (user_data["user_id"],))
+            
+            uploads = []
+            for row in cursor.fetchall():
+                metadata = row[1] if isinstance(row[1], dict) else (json.loads(row[1]) if row[1] else {})
+                uploads.append({
+                    "timestamp": row[0].isoformat(),
+                    "filename": metadata.get("filename", "unknown"),
+                    "link_id": row[2]
+                })
+            
+            cursor.execute("""
+                SELECT aa.timestamp, aa.ip_address, aa.link_id, aa.success, aa.user_name
+                FROM access_attempts aa
+                WHERE aa.link_id IN (
+                    SELECT ul.link_id FROM user_links ul WHERE ul.user_id = %s
+                ) AND aa.access_type = 'download'
+                ORDER BY aa.timestamp DESC LIMIT 10
+            """, (user_data["user_id"],))
+            
+            downloads = []
+            for row in cursor.fetchall():
+                downloads.append({
+                    "timestamp": row[0].isoformat(),
+                    "ip_address": row[1],
+                    "link_id": row[2],
+                    "success": row[3],
+                    "user_name": row[4] or "Anonymous",
+                    "location": get_location_from_ip(row[1])
+                })
+            
+            return {
+                "user_id": user_data["user_id"],
+                "email": user_data["email"],
+                "recent_uploads": uploads,
+                "recent_downloads": downloads
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     import os
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 5000))
+    uvicorn.run(app, host="localhost", port=port)
