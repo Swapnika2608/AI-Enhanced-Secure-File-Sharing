@@ -1,14 +1,31 @@
+import os
+from urllib.parse import urlparse
+
 # AI Security Engine Configuration
 # Update these settings to match your environment
 
 # Database Configuration
-DB_CONFIG = {
-    'host': 'localhost',
-    'port': '5432',
-    'database': 'blindsend_test',
-    'user': 'postgres',
-    'password': 'Swapnika2608'  # CHANGE THIS to your PostgreSQL password
-}
+DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://postgres:Swapnika2608@localhost:5432/blindsend_test')
+
+# Parse DATABASE_URL for Railway deployment
+if DATABASE_URL:
+    url = urlparse(DATABASE_URL)
+    DB_CONFIG = {
+        'host': url.hostname,
+        'port': url.port or 5432,
+        'database': url.path[1:],  # Remove leading slash
+        'user': url.username,
+        'password': url.password
+    }
+else:
+    # Fallback for local development
+    DB_CONFIG = {
+        'host': 'localhost',
+        'port': '5432',
+        'database': 'blindsend_test',
+        'user': 'postgres',
+        'password': 'Swapnika2608'
+    }
 
 # Email Configuration (Optional - for admin notifications)
 EMAIL_CONFIG = {
