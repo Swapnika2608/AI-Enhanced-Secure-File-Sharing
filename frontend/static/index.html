@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Enhanced Secure File Sharing System</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+        @media (max-width: 768px) {
+            .container { padding: 10px; }
+            .header h1 { font-size: 24px; }
+            .card { padding: 20px; }
+            .tabs { flex-wrap: wrap; }
+            .tab { padding: 8px 12px; font-size: 14px; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            .stat-card { padding: 15px; }
+            .stat-number { font-size: 20px; }
+            .security-status { flex-direction: column; gap: 10px; align-items: flex-start; }
+            .activity-header { flex-direction: column; align-items: flex-start; gap: 5px; }
+            .file-stat-item > div { flex-direction: column; align-items: flex-start; gap: 10px; }
+        }
+        .header { text-align: center; margin-bottom: 40px; }
+        .header h1 { color: #333; margin-bottom: 10px; }
+        .header p { color: #666; }
+        .card { background: white; border-radius: 8px; padding: 30px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; color: #333; }
+        .form-group input, .form-group select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; }
+        .btn { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        .btn:hover { background: #0056b3; }
+        .btn-secondary { background: #6c757d; }
+        .btn-secondary:hover { background: #545b62; }
+        .hidden { display: none; }
+        .alert { padding: 12px; border-radius: 4px; margin-bottom: 20px; }
+        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .file-drop { border: 2px dashed #ddd; border-radius: 8px; padding: 40px; text-align: center; margin-bottom: 20px; cursor: pointer; }
+        .file-drop:hover { border-color: #007bff; background: #f8f9fa; }
+        .activity-item { padding: 15px; border-bottom: 1px solid #eee; border-radius: 6px; margin-bottom: 10px; background: #fafafa; }
+        .activity-item:last-child { border-bottom: none; }
+        .activity-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .activity-type { font-weight: 600; color: #333; }
+        .activity-time { font-size: 12px; color: #666; }
+        .activity-details { font-size: 13px; color: #555; line-height: 1.4; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 15px; margin: 20px 0; }
+        .stat-card { text-align: center; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #007bff; }
+        .stat-number { font-size: 28px; font-weight: bold; margin-bottom: 5px; }
+        .stat-label { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+        .analytics-section { margin-top: 25px; padding: 25px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; border: 1px solid #dee2e6; }
+        .file-stats { margin-top: 20px; }
+        .file-stat-item { padding: 12px; margin: 8px 0; background: white; border-radius: 6px; border-left: 3px solid #28a745; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .section-title { font-size: 18px; font-weight: 600; color: #333; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }
+        .success-badge { background: #d4edda; color: #155724; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+        .failed-badge { background: #f8d7da; color: #721c24; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+        .security-status { display: flex; align-items: center; gap: 10px; }
+        .status-indicator { width: 12px; height: 12px; border-radius: 50%; }
+        .status-safe { background: #28a745; }
+        .status-warning { background: #ffc107; }
+        .status-danger { background: #dc3545; }
+        .tabs { display: flex; border-bottom: 1px solid #ddd; margin-bottom: 20px; }
+        .tab { padding: 12px 24px; cursor: pointer; border-bottom: 2px solid transparent; }
+        .tab.active { border-bottom-color: #007bff; color: #007bff; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        @media (max-width: 480px) {
+            .container { padding: 5px; }
+            .header h1 { font-size: 20px; }
+            .card { padding: 15px; margin-bottom: 15px; }
+            .tabs { border-bottom: none; }
+            .tab { width: 50%; text-align: center; padding: 10px 5px; font-size: 12px; }
+            .stats-grid { grid-template-columns: 1fr; }
+            .btn { padding: 10px; font-size: 14px; }
+            .form-group input, .form-group select { padding: 10px; font-size: 14px; }
+            .activity-item { padding: 10px; }
+            .file-stat-item { padding: 10px; }
+            .pagination-controls { flex-direction: column; gap: 10px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 AI Enhanced Secure File Sharing System</h1>
+            <p>End-to-end encrypted file sharing with AI-powered security</p>
+        </div>
+
+        <!-- Authentication Section -->
+        <div id="auth-section" class="card">
+            <div class="tabs">
+                <div class="tab active" onclick="showTab('login')">Login</div>
+                <div class="tab" onclick="showTab('register')">Register</div>
+            </div>
+
+            <div id="login-tab" class="tab-content active">
+                <form id="login-form">
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" id="login-email" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" id="login-password" required>
+                    </div>
+                    <button type="submit" class="btn">Login</button>
+                </form>
+            </div>
+
+            <div id="register-tab" class="tab-content">
+                <form id="register-form">
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" id="register-email" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" id="register-password" required>
+                    </div>
+                    <button type="submit" class="btn">Register</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Main Application -->
+        <div id="app-section" class="hidden">
+            <div class="card">
+                <div class="security-status">
+                    <div class="status-indicator status-safe"></div>
+                    <span>Security Status: Protected by AI</span>
+                    <span id="user-email" style="margin-left: auto; color: #666;"></span>
+                    <button class="btn btn-secondary" onclick="logout()">Logout</button>
+                </div>
+            </div>
+
+            <div class="tabs">
+                <div class="tab active" onclick="showAppTab('upload')">Upload Files</div>
+                <div class="tab" onclick="showAppTab('activity')">Recent Activity</div>
+                <div class="tab" onclick="showAppTab('analytics')">Analytics</div>
+                <div class="tab" onclick="showAppTab('security')">Security</div>
+            </div>
+
+            <!-- Upload Tab -->
+            <div id="upload-tab" class="tab-content active">
+                <div class="card">
+                    <h3>Upload Secure File</h3>
+                    <form id="upload-form">
+                        <div class="file-drop" onclick="document.getElementById('file-input').click()">
+                            <input type="file" id="file-input" style="display: none;" required>
+                            <p>Click to select file or drag and drop</p>
+                            <p id="selected-file" style="color: #007bff; margin-top: 10px;"></p>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Maximum Downloads</label>
+                            <select id="max-downloads">
+                                <option value="1">1 download</option>
+                                <option value="5">5 downloads</option>
+                                <option value="10" selected>10 downloads</option>
+                                <option value="50">50 downloads</option>
+                                <option value="100">100 downloads</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Expires After</label>
+                            <select id="expires-hours">
+                                <option value="1">1 hour</option>
+                                <option value="24">24 hours</option>
+                                <option value="168" selected>7 days</option>
+                                <option value="720">30 days</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Password Protection (Optional)</label>
+                            <input type="password" id="file-password" placeholder="Leave empty for no password" oninput="checkPasswordStrength()">
+                            <div id="password-strength" style="margin-top: 5px; font-size: 12px;"></div>
+                            <div style="font-size: 11px; color: #666; margin-top: 5px;">
+                                💡 Strong password: 8+ chars, uppercase, lowercase, numbers, symbols
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn">Upload & Generate Link</button>
+                    </form>
+
+                    <div id="upload-result" class="hidden">
+                        <div class="alert alert-success">
+                            <h4>File uploaded successfully!</h4>
+                            <p><strong>Download Link:</strong></p>
+                            <input type="text" id="download-link" readonly style="width: 100%; margin: 10px 0;">
+                            <button class="btn btn-secondary" onclick="copyLink()">Copy Link</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Activity Tab -->
+            <div id="activity-tab" class="tab-content">
+                <div class="card">
+                    <h3>📋 Recent Activity</h3>
+                    <div id="activity-list">
+                        <p>Loading activity...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Tab -->
+            <div id="analytics-tab" class="tab-content">
+                <div class="card">
+                    <h3>📊 Analytics Dashboard</h3>
+                    <div id="analytics-content">
+                        <p>Loading analytics...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Security Tab -->
+            <div id="security-tab" class="tab-content">
+                <div class="card">
+                    <h3>🛡️ Security Alerts</h3>
+                    <div id="security-alerts">
+                        <p>Loading security status...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="alerts"></div>
+    </div>
+
+    <script>
+        let authToken = localStorage.getItem('authToken');
+        let currentUser = null;
+
+        // Initialize app
+        if (authToken) {
+            showApp();
+            loadUserActivity();
+        }
+
+        // Tab switching
+        function showTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelector(`[onclick="showTab('${tab}')"]`).classList.add('active');
+            document.getElementById(`${tab}-tab`).classList.add('active');
+        }
+
+        function showAppTab(tab) {
+            document.querySelectorAll('#app-section .tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('#app-section .tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelector(`[onclick="showAppTab('${tab}')"]`).classList.add('active');
+            document.getElementById(`${tab}-tab`).classList.add('active');
+            
+            if (tab === 'activity' || tab === 'analytics' || tab === 'security') {
+                loadUserActivity();
+            }
+        }
+
+        // Authentication
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    authToken = data.token;
+                    currentUser = data;
+                    localStorage.setItem('authToken', authToken);
+                    showApp();
+                    showAlert('Login successful!', 'success');
+                } else {
+                    showAlert(data.detail || 'Login failed', 'error');
+                }
+            } catch (error) {
+                showAlert('Network error', 'error');
+            }
+        });
+
+        document.getElementById('register-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('register-email').value;
+            const password = document.getElementById('register-password').value;
+
+            try {
+                const response = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    authToken = data.token;
+                    currentUser = data;
+                    localStorage.setItem('authToken', authToken);
+                    showApp();
+                    showAlert('Registration successful!', 'success');
+                } else {
+                    showAlert(data.detail || 'Registration failed', 'error');
+                }
+            } catch (error) {
+                showAlert('Network error', 'error');
+            }
+        });
+
+        // File upload with encryption
+        document.getElementById('upload-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileInput = document.getElementById('file-input');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                showAlert('Please select a file', 'error');
+                return;
+            }
+
+            try {
+                showAlert('🔐 Encrypting file...', 'success');
+                
+                // Generate encryption key
+                const key = await crypto.subtle.generateKey(
+                    { name: 'AES-GCM', length: 256 },
+                    true,
+                    ['encrypt', 'decrypt']
+                );
+                
+                // Export key to base64 with validation
+                const exportedKey = await crypto.subtle.exportKey('raw', key);
+                const keyString = btoa(String.fromCharCode(...new Uint8Array(exportedKey)));
+                
+                // Validate the exported key
+                if (keyString.length !== 44) {
+                    throw new Error('Key generation failed - invalid length');
+                }
+                
+                // Encrypt file
+                const iv = crypto.getRandomValues(new Uint8Array(12));
+                const fileData = await file.arrayBuffer();
+                
+                const encrypted = await crypto.subtle.encrypt(
+                    { name: 'AES-GCM', iv: iv },
+                    key,
+                    fileData
+                );
+                
+                // Combine IV + encrypted data
+                const combined = new Uint8Array(iv.length + encrypted.byteLength);
+                combined.set(iv);
+                combined.set(new Uint8Array(encrypted), iv.length);
+                
+                // Create encrypted file
+                const encryptedFile = new File([combined], file.name + '.encrypted', {
+                    type: 'application/octet-stream'
+                });
+                
+                showAlert('📤 Uploading encrypted file...', 'success');
+
+                const formData = new FormData();
+                formData.append('file', encryptedFile);
+                formData.append('max_downloads', document.getElementById('max-downloads').value);
+                formData.append('expires_hours', document.getElementById('expires-hours').value);
+                const password = document.getElementById('file-password').value;
+                if (password) formData.append('password', password);
+
+                const response = await fetch('/api/files/upload', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${authToken}` },
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    const downloadUrl = `${window.location.origin}${data.download_url}`;
+                    document.getElementById('download-link').value = downloadUrl;
+                    document.getElementById('upload-result').classList.remove('hidden');
+                    
+                    // Show decryption key separately
+                    const resultDiv = document.getElementById('upload-result');
+                    resultDiv.innerHTML = `
+                        <div class="alert alert-success">
+                            <h4>✅ File encrypted and uploaded successfully!</h4>
+                            <p><strong>🔗 Download Link:</strong></p>
+                            <input type="text" value="${downloadUrl}" readonly style="width: 100%; margin: 5px 0; padding: 8px;">
+                            <button class="btn btn-secondary" onclick="copyToClipboard('${downloadUrl}')">Copy Link</button>
+                            
+                            <p style="margin-top: 20px;"><strong>🔑 Decryption Key (Share Separately!):</strong></p>
+                            <input type="text" value="${keyString}" readonly style="width: 100%; margin: 5px 0; padding: 8px; background: #fff3cd;">
+                            <button class="btn btn-secondary" onclick="copyToClipboard('${keyString}')">Copy Key</button>
+                            
+                            <div style="background: #f8d7da; padding: 15px; margin: 15px 0; border-radius: 5px; border-left: 4px solid #dc3545;">
+                                <strong>⚠️ SECURITY WARNING:</strong><br>
+                                • Share the download link and decryption key through <strong>different channels</strong><br>
+                                • Example: Send link via email, key via SMS/WhatsApp<br>
+                                • Never send both together - this defeats encryption!
+                            </div>
+                        </div>
+                    `;
+                    
+                    document.getElementById('upload-form').reset();
+                    document.getElementById('selected-file').textContent = '';
+                    showAlert('✅ File encrypted and uploaded successfully!', 'success');
+                } else {
+                    showAlert(data.detail || 'Upload failed', 'error');
+                }
+            } catch (error) {
+                showAlert('Encryption/Upload error: ' + error.message, 'error');
+            }
+        });
+
+        // File input change handler
+        document.getElementById('file-input').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                document.getElementById('selected-file').textContent = `Selected: ${file.name}`;
+            }
+        });
+        function showApp() {
+            document.getElementById('auth-section').classList.add('hidden');
+            document.getElementById('app-section').classList.remove('hidden');
+            if (currentUser) {
+                document.getElementById('user-email').textContent = currentUser.email;
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('authToken');
+            authToken = null;
+            currentUser = null;
+            document.getElementById('auth-section').classList.remove('hidden');
+            document.getElementById('app-section').classList.add('hidden');
+            showAlert('Logged out successfully', 'success');
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showAlert('Copied to clipboard!', 'success');
+            }).catch(() => {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                showAlert('Copied to clipboard!', 'success');
+            });
+        }
+
+        let currentPage = 1;
+        let currentLimit = 10;
+        let currentFilePage = 1;
+        let currentFileLimit = 10;
+        let paginationData = null;
+
+        async function loadUserActivity(page = 1, limit = 10, filePage = null, fileLimit = null) {
+            if (!authToken) return;
+
+            currentPage = page;
+            currentLimit = limit;
+            if (filePage !== null) currentFilePage = filePage;
+            if (fileLimit !== null) currentFileLimit = fileLimit;
+
+            try {
+                const response = await fetch(`/api/user/activity?page=${page}&limit=${limit}&file_page=${currentFilePage}&file_limit=${currentFileLimit}`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    paginationData = data.pagination;
+                    displayActivity(data);
+                }
+            } catch (error) {
+                console.error('Failed to load activity:', error);
+            }
+        }
+
+        function displayActivity(data) {
+            const activityList = document.getElementById('activity-list');
+            const analyticsContent = document.getElementById('analytics-content');
+            const alertsList = document.getElementById('security-alerts');
+
+            // Recent Activity Tab with pagination
+            let activityHtml = '';
+            
+            // Add pagination controls at top
+            if (paginationData) {
+                activityHtml += `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <label>Show:</label>
+                            <select onchange="changeLimit(this.value)" style="padding: 5px;">
+                                <option value="5" ${currentLimit === 5 ? 'selected' : ''}>5 per page</option>
+                                <option value="10" ${currentLimit === 10 ? 'selected' : ''}>10 per page</option>
+                                <option value="20" ${currentLimit === 20 ? 'selected' : ''}>20 per page</option>
+                                <option value="50" ${currentLimit === 50 ? 'selected' : ''}>50 per page</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <span style="font-size: 14px; color: #666;">Page ${paginationData.current_page}</span>
+                            <button onclick="changePage(${Math.max(1, currentPage - 1)})" ${currentPage <= 1 ? 'disabled' : ''} class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;">← Prev</button>
+                            <button onclick="changePage(${currentPage + 1})" ${currentPage >= Math.max(paginationData.total_upload_pages, paginationData.total_download_pages) ? 'disabled' : ''} class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;">Next →</button>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Display uploads
+            if (data.recent_uploads && data.recent_uploads.length > 0) {
+                activityHtml += '<div class="section-title"><span>📁</span> Recent Uploads</div>';
+                data.recent_uploads.forEach(upload => {
+                    activityHtml += `
+                        <div class="activity-item">
+                            <div class="activity-header">
+                                <span class="activity-type">File Upload</span>
+                                <span class="activity-time">${new Date(upload.timestamp).toLocaleString()}</span>
+                            </div>
+                            <div class="activity-details">
+                                <strong>${upload.filename}</strong><br>
+                                <small style="color: #666;">ID: ${upload.link_id.substring(0, 8)}...</small>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            
+            // Display downloads
+            if (data.recent_downloads && data.recent_downloads.length > 0) {
+                activityHtml += '<div class="section-title"><span>⬇️</span> Recent Downloads</div>';
+                data.recent_downloads.forEach(download => {
+                    const badge = download.success ? 
+                        '<span class="success-badge">Success</span>' : 
+                        '<span class="failed-badge">Failed</span>';
+                    
+                    activityHtml += `
+                        <div class="activity-item">
+                            <div class="activity-header">
+                                <span class="activity-type">Download ${badge}</span>
+                                <span class="activity-time">${new Date(download.timestamp).toLocaleString()}</span>
+                            </div>
+                            <div class="activity-details">
+                                <strong>User:</strong> ${download.user_name || 'Anonymous'} <strong>Location:</strong> ${download.location}<br>
+                                <small style="color: #666;">ID: ${download.link_id.substring(0, 8)}... • IP: ${download.ip_address}</small>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            
+            if (activityHtml === '' || ((!data.recent_uploads || data.recent_uploads.length === 0) && (!data.recent_downloads || data.recent_downloads.length === 0))) {
+                if (paginationData && paginationData.current_page > 1) {
+                    activityList.innerHTML = activityHtml + '<p style="text-align: center; color: #666; padding: 20px;">No more activity on this page. <button onclick="changePage(1)" class="btn btn-secondary" style="padding: 5px 10px; margin-left: 10px;">Go to First Page</button></p>';
+                } else {
+                    activityList.innerHTML = activityHtml + '<p style="text-align: center; color: #666; padding: 20px;">No recent activity</p>';
+                }
+            } else {
+                // Add pagination info at bottom
+                if (paginationData) {
+                    activityHtml += `
+                        <div style="text-align: center; margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; font-size: 14px; color: #666;">
+                            Showing ${Math.min(paginationData.total_uploads + paginationData.total_downloads, currentLimit)} items
+                            (${paginationData.total_uploads} uploads, ${paginationData.total_downloads} downloads total)
+                        </div>
+                    `;
+                }
+                activityList.innerHTML = activityHtml;
+            }
+
+            // Analytics Tab
+            let analyticsHtml = '';
+            if (data.analytics) {
+                const totalDownloads = data.analytics.file_statistics ? data.analytics.file_statistics.reduce((sum, f) => sum + f.total_downloads, 0) : 0;
+                const totalFailures = data.analytics.file_statistics ? data.analytics.file_statistics.reduce((sum, f) => sum + f.failed_attempts, 0) : 0;
+                
+                analyticsHtml += `
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-number" style="color: #007bff;">${data.analytics.unique_visitors || 0}</div>
+                            <div class="stat-label">Unique Visitors</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" style="color: #28a745;">${totalDownloads}</div>
+                            <div class="stat-label">Total Downloads</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" style="color: #dc3545;">${totalFailures}</div>
+                            <div class="stat-label">Failed Attempts</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" style="color: #6f42c1;">${data.analytics.total_files_shared || 0}</div>
+                            <div class="stat-label">Files Shared</div>
+                        </div>
+                    </div>
+                `;
+                
+                // Per-file statistics with pagination
+                if (data.analytics.file_statistics && data.analytics.file_statistics.length > 0) {
+                    analyticsHtml += `
+                        <div class="file-stats">
+                            <div class="section-title"><span>📊</span> File Performance</div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 6px;">
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <label>Show:</label>
+                                    <select onchange="changeFileLimit(this.value)" style="padding: 5px;">
+                                        <option value="5" ${currentFileLimit === 5 ? 'selected' : ''}>5 per page</option>
+                                        <option value="10" ${currentFileLimit === 10 ? 'selected' : ''}>10 per page</option>
+                                        <option value="20" ${currentFileLimit === 20 ? 'selected' : ''}>20 per page</option>
+                                        <option value="50" ${currentFileLimit === 50 ? 'selected' : ''}>50 per page</option>
+                                    </select>
+                                </div>
+                                <div style="display: flex; gap: 8px; align-items: center;">
+                                    <span style="font-size: 14px; color: #666;">Page ${paginationData ? paginationData.file_page : 1} of ${paginationData ? paginationData.total_file_pages : 1}</span>
+                                    <button onclick="changeFilePerformancePage(${Math.max(1, currentFilePage - 1)})" ${currentFilePage <= 1 ? 'disabled' : ''} class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;">← Prev</button>
+                                    <button onclick="changeFilePerformancePage(${currentFilePage + 1})" ${paginationData && currentFilePage >= paginationData.total_file_pages ? 'disabled' : ''} class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;">Next →</button>
+                                </div>
+                            </div>
+                    `;
+                    
+                    data.analytics.file_statistics.forEach(stat => {
+                        analyticsHtml += `
+                            <div class="file-stat-item">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <strong>${stat.filename || 'Unknown File'}</strong><br>
+                                        <small style="color: #666;">ID: ${stat.link_id.substring(0, 8)}...</small>
+                                    </div>
+                                    <div style="text-align: right; font-size: 13px;">
+                                        <span style="color: #28a745; font-weight: 600;">${stat.total_downloads} downloads</span>
+                                        ${stat.failed_attempts > 0 ? `<span style="color: #dc3545; margin-left: 10px;">${stat.failed_attempts} failures</span>` : ''}<br>
+                                        <button onclick="revokeAccess('${stat.link_id}')" class="btn" style="padding: 4px 8px; font-size: 11px; background: #dc3545; margin-top: 5px;">🚫 Revoke Access</button>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    analyticsHtml += `
+                        <div style="text-align: center; margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; font-size: 14px; color: #666;">
+                            Showing ${Math.min(paginationData.total_files, currentFileLimit)} files (${paginationData.total_files} total files)
+                        </div>
+                    `;
+                    
+                    analyticsHtml += '</div>';
+                }
+            }
+            
+            if (analyticsHtml === '') {
+                analyticsContent.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;">No analytics data available</p>';
+            } else {
+                analyticsContent.innerHTML = analyticsHtml;
+            }
+
+            // Security Tab
+            if (data.security_alerts && data.security_alerts.length > 0) {
+                alertsList.innerHTML = data.security_alerts.map(alert => {
+                    const severityColor = alert.severity === 'high' ? '#dc3545' : alert.severity === 'medium' ? '#ffc107' : '#28a745';
+                    const severityIcon = alert.severity === 'high' ? '🚨' : alert.severity === 'medium' ? '⚠️' : 'ℹ️';
+                    
+                    return `
+                        <div class="activity-item" style="border-left: 4px solid ${severityColor};">
+                            <div class="activity-header">
+                                <span class="activity-type">${severityIcon} ${alert.severity.toUpperCase()} ALERT</span>
+                                <span class="activity-time">${new Date(alert.timestamp).toLocaleString()}</span>
+                            </div>
+                            <div class="activity-details">
+                                <strong>${alert.message}</strong><br>
+                                <small style="color: #666;">Alert Type: ${alert.type}</small>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                alertsList.innerHTML = '<div style="text-align: center; padding: 40px;"><div style="font-size: 48px; margin-bottom: 20px;">🛡️</div><h4 style="color: #28a745;">All Systems Secure</h4><p style="color: #666;">No security threats detected</p></div>';
+            }
+        }
+
+        function checkPasswordStrength() {
+            const password = document.getElementById('file-password').value;
+            const strengthDiv = document.getElementById('password-strength');
+            
+            if (!password) {
+                strengthDiv.innerHTML = '';
+                return;
+            }
+            
+            let score = 0;
+            let feedback = [];
+            
+            // Length check
+            if (password.length >= 8) score++; else feedback.push('8+ characters');
+            if (password.length >= 12) score++;
+            
+            // Character variety
+            if (/[a-z]/.test(password)) score++; else feedback.push('lowercase');
+            if (/[A-Z]/.test(password)) score++; else feedback.push('uppercase');
+            if (/[0-9]/.test(password)) score++; else feedback.push('numbers');
+            if (/[^A-Za-z0-9]/.test(password)) score++; else feedback.push('symbols');
+            
+            let strength, color;
+            if (score < 3) {
+                strength = 'Weak ❌';
+                color = '#dc3545';
+            } else if (score < 5) {
+                strength = 'Medium ⚠️';
+                color = '#ffc107';
+            } else {
+                strength = 'Strong ✅';
+                color = '#28a745';
+            }
+            
+            strengthDiv.innerHTML = `<span style="color: ${color}; font-weight: bold;">${strength}</span>${feedback.length ? ' - Need: ' + feedback.join(', ') : ''}`;
+        }
+
+        async function revokeAccess(linkId) {
+            if (!confirm('Are you sure you want to revoke access to this file? This cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/files/revoke/${linkId}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                
+                if (response.ok) {
+                    showAlert('Access revoked successfully!', 'success');
+                    loadUserActivity(currentPage, currentLimit, currentFilePage, currentFileLimit);
+                } else {
+                    const data = await response.json();
+                    showAlert(data.detail || 'Failed to revoke access', 'error');
+                }
+            } catch (error) {
+                showAlert('Network error', 'error');
+            }
+        }
+
+        function changeFileLimit(limit) {
+            loadUserActivity(currentPage, currentLimit, 1, parseInt(limit));
+        }
+
+        function changeFilePerformancePage(page) {
+            loadUserActivity(currentPage, currentLimit, page, currentFileLimit);
+        }
+
+        function changePage(page) {
+            loadUserActivity(page, currentLimit);
+        }
+
+        function changeLimit(limit) {
+            loadUserActivity(1, parseInt(limit));
+        }
+
+        function showAlert(message, type) {
+            const alertsContainer = document.getElementById('alerts');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alertsContainer.appendChild(alert);
+            
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        // Drag and drop
+        const fileDropArea = document.querySelector('.file-drop');
+        fileDropArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            fileDropArea.style.borderColor = '#007bff';
+            fileDropArea.style.background = '#f8f9fa';
+        });
+
+        fileDropArea.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            fileDropArea.style.borderColor = '#ddd';
+            fileDropArea.style.background = 'white';
+        });
+
+        fileDropArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            fileDropArea.style.borderColor = '#ddd';
+            fileDropArea.style.background = 'white';
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                document.getElementById('file-input').files = files;
+                document.getElementById('selected-file').textContent = `Selected: ${files[0].name}`;
+            }
+        });
+    </script>
+</body>
+</html>

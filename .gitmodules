@@ -1,8 +1,4 @@
-[submodule "web-client"]
-	path = web-client
-	url = git@github.com:blindnet-io/blindsend-web-client.git
-	branch = main
 [submodule "server"]
 	path = server
-	url = git@github.com:blindnet-io/blindsend-server.git
+	url = https://github.com/blindnet-io/blindsend-server.git
 	branch = main

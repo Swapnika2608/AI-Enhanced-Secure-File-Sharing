@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Download Encrypted File - BlindSend</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 600px; margin: 50px auto; padding: 20px; }
+        .card { background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header { text-align: center; margin-bottom: 30px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; color: #333; }
+        .form-group input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px; }
+        .btn { background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; width: 100%; }
+        .btn:hover { background: #0056b3; }
+        .btn:disabled { background: #ccc; cursor: not-allowed; }
+        .alert { padding: 12px; border-radius: 4px; margin-bottom: 20px; }
+        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .key-info { background: #fff3cd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #ffc107; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="header">
+                <h1>🔐 BlindSend - Secure Download</h1>
+                <p>End-to-end encrypted file sharing</p>
+            </div>
+
+            <div class="key-info">
+                <strong>🔑 Decryption Key Required</strong><br>
+                If the download link contains a key (after #key=), it will be used automatically. 
+                Otherwise, enter the decryption key provided by the sender.
+            </div>
+
+            <form id="download-form">
+                <div class="form-group">
+                    <label>Your Name (Required)</label>
+                    <input type="text" id="user-name" placeholder="Enter your name" required>
+                </div>
+
+                <div class="form-group" id="password-group" style="display: none;">
+                    <label>File Password</label>
+                    <input type="password" id="file-password" placeholder="Enter file password">
+                </div>
+
+                <div class="form-group" id="key-group">
+                    <label>Decryption Key</label>
+                    <input type="text" id="decryption-key" placeholder="Enter decryption key" readonly>
+                    <small style="color: #666;">Key detected from URL or enter manually</small>
+                </div>
+
+                <button type="submit" class="btn" id="download-btn">🔓 Download & Decrypt</button>
+            </form>
+
+            <div id="status"></div>
+        </div>
+    </div>
+
+    <script>
+        // Extract file ID from URL (no key in URL anymore)
+        const urlPath = window.location.pathname;
+        const fileId = urlPath.split('/download/')[1];
+        
+        // Key must be entered manually - no auto-detection from URL
+        document.getElementById('decryption-key').removeAttribute('readonly');
+        document.getElementById('decryption-key').placeholder = 'Enter decryption key provided separately';
+        
+        const keyInfo = document.querySelector('.key-info');
+        keyInfo.innerHTML = `
+            <strong>🔑 Decryption Key Required</strong><br>
+            The sender should have provided you with a decryption key through a <strong>separate secure channel</strong> 
+            (different from how you received this link). Enter it below to decrypt and download the file.
+        `;
+        
+        // Check if file requires password by making a test request
+        checkPasswordRequirement();
+
+        // Check if file requires password
+        async function checkPasswordRequirement() {
+            try {
+                const response = await fetch(`/api/files/download/${fileId}?user_name=test`);
+                if (response.status === 401) {
+                    const errorText = await response.text();
+                    if (errorText.includes('Password required')) {
+                        document.getElementById('password-group').style.display = 'block';
+                        showStatus('🔒 This file is password protected', false);
+                    }
+                }
+            } catch (error) {
+                // Ignore errors in password check
+            }
+        }
+        
+        function showStatus(message, isError = false) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = `<div class="status ${isError ? 'error' : 'success'}">${message}</div>`;
+        }
+
+        // Import key from base64 with validation
+        async function importKey(keyString) {
+            try {
+                // Validate base64 format and length
+                if (!keyString || keyString.length !== 44) {
+                    throw new Error('Invalid key format - must be 44 characters');
+                }
+                
+                // Check if it's valid base64
+                if (!/^[A-Za-z0-9+/]{42}[A-Za-z0-9+/=]{2}$/.test(keyString)) {
+                    throw new Error('Invalid key format - not valid base64');
+                }
+                
+                const keyData = new Uint8Array(atob(keyString).split('').map(c => c.charCodeAt(0)));
+                
+                // AES-256 key should be exactly 32 bytes
+                if (keyData.length !== 32) {
+                    throw new Error('Invalid key length - must be 256 bits (32 bytes)');
+                }
+                
+                return await crypto.subtle.importKey(
+                    'raw',
+                    keyData,
+                    { name: 'AES-GCM' },
+                    false,
+                    ['decrypt']
+                );
+            } catch (error) {
+                throw new Error('Invalid decryption key: ' + error.message);
+            }
+        }
+
+        // Decrypt file
+        async function decryptFile(encryptedData, key) {
+            const iv = encryptedData.slice(0, 12);
+            const data = encryptedData.slice(12);
+            
+            return await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: iv },
+                key,
+                data
+            );
+        }
+
+        // Get MIME type from filename
+        function getMimeType(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            const mimeTypes = {
+                'pdf': 'application/pdf',
+                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'gif': 'image/gif',
+                'txt': 'text/plain', 'doc': 'application/msword',
+                'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'xls': 'application/vnd.ms-excel',
+                'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'ppt': 'application/vnd.ms-powerpoint',
+                'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                'zip': 'application/zip', 'mp4': 'video/mp4', 'mp3': 'audio/mpeg', 'wav': 'audio/wav'
+            };
+            return mimeTypes[ext] || 'application/octet-stream';
+        }
+
+        document.getElementById('download-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const userName = document.getElementById('user-name').value.trim();
+            const filePassword = document.getElementById('file-password').value;
+            const keyInput = document.getElementById('decryption-key').value.trim();
+            
+            if (!userName) {
+                showStatus('❌ Please enter your name', true);
+                return;
+            }
+            
+            if (!keyInput) {
+                showStatus('❌ Decryption key is required', true);
+                return;
+            }
+
+            try {
+                showStatus('📥 Downloading encrypted file...');
+                
+                // Build download URL with parameters
+                let downloadUrl = `/api/files/download/${fileId}?user_name=${encodeURIComponent(userName)}`;
+                if (filePassword) {
+                    downloadUrl += `&password=${encodeURIComponent(filePassword)}`;
+                }
+                
+                const response = await fetch(downloadUrl);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    let errorMessage = errorText;
+                    
+                    // Try to parse JSON error response
+                    try {
+                        const errorJson = JSON.parse(errorText);
+                        if (errorJson.detail) {
+                            errorMessage = errorJson.detail;
+                        }
+                    } catch (e) {
+                        // If not JSON, use the raw text
+                    }
+                    
+                    if (response.status === 401) {
+                        if (errorMessage.includes('Password required')) {
+                            // Show password field if not already shown
+                            document.getElementById('password-group').style.display = 'block';
+                            showStatus('🔒 File password required', true);
+                        } else if (errorMessage.includes('Invalid password')) {
+                            showStatus('❌ Incorrect password', true);
+                        } else {
+                            showStatus('❌ Access denied: ' + errorMessage, true);
+                        }
+                        return;
+                    } else if (response.status === 403) {
+                        if (errorMessage.includes('Access revoked')) {
+                            showStatus('❌ Access revoked - file owner has disabled this link', true);
+                        } else if (errorMessage.includes('Link expired')) {
+                            showStatus('❌ Link expired - file is no longer available', true);
+                        } else if (errorMessage.includes('Download limit exceeded')) {
+                            showStatus('❌ Download limit exceeded - maximum downloads reached', true);
+                        } else {
+                            showStatus('❌ Access forbidden: ' + errorMessage, true);
+                        }
+                        return;
+                    } else if (response.status === 404) {
+                        showStatus('❌ File not found - link may be invalid or expired', true);
+                        return;
+                    }
+                    
+                    throw new Error(errorMessage);
+                }
+                
+                const encryptedData = await response.arrayBuffer();
+                
+                showStatus('🔓 Decrypting file...');
+                
+                // Import decryption key
+                const key = await importKey(keyInput);
+                
+                // Decrypt file
+                const decryptedData = await decryptFile(new Uint8Array(encryptedData), key);
+                
+                showStatus('💾 Saving decrypted file...');
+                
+                // Get original filename
+                let filename = 'decrypted_file';
+                const contentDisposition = response.headers.get('content-disposition');
+                if (contentDisposition) {
+                    const match = contentDisposition.match(/filename="?([^"]+)"?/);
+                    if (match) {
+                        filename = match[1].replace('.encrypted', '');
+                    }
+                }
+                
+                // Create download with proper MIME type
+                const mimeType = getMimeType(filename);
+                const blob = new Blob([decryptedData], { type: mimeType });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(url);
+                
+                showStatus('✅ File decrypted and downloaded successfully!');
+                
+            } catch (error) {
+                console.error('Download error:', error);
+                if (error.message.includes('Invalid decryption key')) {
+                    showStatus('❌ ' + error.message, true);
+                } else if (error.name === 'OperationError' || error.message.includes('decrypt')) {
+                    showStatus('❌ Invalid decryption key - decryption failed', true);
+                } else {
+                    showStatus('❌ Download failed: ' + error.message, true);
+                }
+            }
+        });
+
+        // Auto-focus name field
+        document.getElementById('user-name').focus();
+    </script>
+</body>
+</html>
