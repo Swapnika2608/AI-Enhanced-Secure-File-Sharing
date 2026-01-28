@@ -19,7 +19,7 @@ import os
 import sys
 
 # Add AI security path
-sys.path.append('../ai_security')
+sys.path.append('ai_security')
 from config import DB_CONFIG
 
 import smtplib
