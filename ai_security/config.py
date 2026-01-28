@@ -13,7 +13,7 @@ if DATABASE_URL:
     DB_CONFIG = {
         'host': url.hostname,
         'port': url.port or 5432,
-        'database': url.path[1:],  # Remove leading slash
+        'dbname': url.path[1:],  # Remove leading slash - psycopg3 uses 'dbname' not 'database'
         'user': url.username,
         'password': url.password
     }
@@ -22,7 +22,7 @@ else:
     DB_CONFIG = {
         'host': 'localhost',
         'port': '5432',
-        'database': 'blindsend_test',
+        'dbname': 'blindsend_test',  # Changed from 'database' to 'dbname'
         'user': 'postgres',
         'password': 'Swapnika2608'
     }
