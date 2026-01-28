@@ -1,0 +1,22 @@
+# AI Security Engine Requirements
+# Phase 2: AI/ML Security Components
+
+# Core Data Science Libraries
+pandas>=1.5.0
+numpy>=1.21.0
+scikit-learn>=1.1.0
+
+# Machine Learning Libraries
+tensorflow>=2.10.0
+joblib>=1.2.0
+
+# Database Connectivity
+psycopg2-binary>=2.9.0
+
+# Utilities
+python-dateutil>=2.8.0
+
+# Optional: For advanced features
+# matplotlib>=3.5.0  # For visualization
+# seaborn>=0.11.0    # For statistical plots
+# plotly>=5.0.0      # For interactive dashboards
