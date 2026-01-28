@@ -8,7 +8,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
-import psycopg2
+import psycopg
 import bcrypt
 import jwt
 import uuid
@@ -124,7 +124,7 @@ JWT_ALGORITHM = "HS256"
 
 def get_db():
     """Database connection"""
-    return psycopg2.connect(**DB_CONFIG)
+    return psycopg.connect(**DB_CONFIG)
 
 def create_jwt_token(user_id: int, email: str) -> str:
     """Create JWT token for user"""
