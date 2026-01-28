@@ -111,12 +111,12 @@ app.add_middleware(
 )
 
 # Serve static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
 
 @app.get("/favicon.ico")
 async def favicon():
     """Serve favicon"""
-    return FileResponse("favicon.ico")
+    return FileResponse("frontend/favicon.ico")
 
 # JWT settings
 JWT_SECRET = "your-secret-key-change-in-production"
@@ -149,7 +149,7 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 async def home():
     """Serve main page"""
     try:
-        with open("static/index.html", "r", encoding="utf-8") as f:
+        with open("frontend/static/index.html", "r", encoding="utf-8") as f:
             return HTMLResponse(f.read())
     except FileNotFoundError:
         return HTMLResponse("""
@@ -188,7 +188,7 @@ async def upload_file_simple(file: UploadFile = File(...)):
 async def download_page(file_id: str):
     """Serve download page with decryption capability"""
     try:
-        with open("static/download.html", "r", encoding="utf-8") as f:
+        with open("frontend/static/download.html", "r", encoding="utf-8") as f:
             return HTMLResponse(f.read())
     except FileNotFoundError:
         return HTMLResponse(f"""
