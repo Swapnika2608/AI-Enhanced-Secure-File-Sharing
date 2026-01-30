@@ -12,11 +12,28 @@ import psycopg
 import bcrypt
 import jwt
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 import json
 import os
 import sys
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+def utc_now():
+    """Get current UTC time - use this for all database storage"""
+    return datetime.now(timezone.utc)
+
+def to_india_time(utc_datetime):
+    """Convert UTC datetime to India time for display"""
+    if utc_datetime is None:
+        return None
+    if utc_datetime.tzinfo is None:
+        utc_datetime = utc_datetime.replace(tzinfo=timezone.utc)
+    india_tz = timezone(timedelta(hours=5, minutes=30))
+    return utc_datetime.astimezone(india_tz).isoformat()
 
 # Add AI security path
 sys.path.append('ai_security')
@@ -232,7 +249,7 @@ def create_jwt_token(user_id: int, email: str) -> str:
     payload = {
         "user_id": user_id,
         "email": email,
-        "exp": datetime.utcnow() + timedelta(hours=24)
+        "exp": utc_now() + timedelta(hours=24)
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
@@ -737,7 +754,7 @@ async def report_decrypt_failure(link_id: str, request: Request):
             cursor.execute("""
                 INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (link_id, client_ip, datetime.now(), access_type, False, 0.9, user_name))
+            """, (link_id, client_ip, utc_now(), access_type, False, 0.9, user_name))
             
             # Check for multiple failed attempts (combined all failure types)
             cursor.execute("""
@@ -785,7 +802,7 @@ async def report_decrypt_failure(link_id: str, request: Request):
                         cursor.execute("""
                             INSERT INTO security_alerts (user_id, alert_type, severity, message, link_id, created_at)
                             VALUES (%s, %s, %s, %s, %s, %s)
-                        """, (owner_id, "suspicious_access_attempts", "high", alert_msg, link_id, datetime.now()))
+                        """, (owner_id, "suspicious_access_attempts", "high", alert_msg, link_id, utc_now()))
                         
                         # Send email alert
                         try:
@@ -831,7 +848,7 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
                 cursor.execute("""
                     INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """, (link_id, client_ip, datetime.now(), "password_failure", False, 0.8, user_name))
+                """, (link_id, client_ip, utc_now(), "password_failure", False, 0.8, user_name))
                 conn.commit()
                 raise HTTPException(status_code=401, detail="Invalid password")
             
@@ -890,38 +907,7 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
             cursor.execute("""
                 INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (link_id, client_ip, datetime.now(), "download", True, 0.1, user_name))
-            
-            # AI-powered risk assessment
-            if ai_engine and ai_engine.models_trained:
-                try:
-                    # Get file owner for risk assessment
-                    cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
-                    owner_result = cursor.fetchone()
-                    
-                    if owner_result:
-                        owner_id = owner_result[0]
-                        
-                        # Perform AI risk assessment
-                        risk_assessment = ai_engine.assess_single_user(
-                            user_id=owner_id,
-                            context={
-                                'download_ip': client_ip,
-                                'download_user': user_name,
-                                'link_id': link_id,
-                                'access_time': datetime.now().isoformat()
-                            }
-                        )
-                        
-                        if risk_assessment and risk_assessment['risk_level'] in ['high', 'critical']:
-                            # Generate automated security responses
-                            responses = ai_engine.response_system.process_threat_detection(risk_assessment)
-                            ai_engine.response_system.execute_responses(responses)
-                            
-                            print(f"HIGH-RISK download detected for user {owner_id}: {risk_assessment['risk_level']}")
-                            
-                except Exception as e:
-                    print(f"AI risk assessment failed: {e}")
+            """, (link_id, client_ip, utc_now(), "download", True, 0.1, user_name))
             
             conn.commit()
             
@@ -994,7 +980,7 @@ async def get_user_activity(
                 for row in rows:
                     metadata = row[1] if isinstance(row[1], dict) else (json.loads(row[1]) if row[1] else {})
                     upload_data = {
-                        "timestamp": row[0].isoformat(),
+                        "timestamp": to_india_time(row[0]),
                         "filename": metadata.get("filename", "unknown"),
                         "link_id": row[2]
                     }
@@ -1030,7 +1016,7 @@ async def get_user_activity(
                 for row in cursor.fetchall():
                     location = get_location_from_ip(row[1])
                     downloads.append({
-                        "timestamp": row[0].isoformat(),
+                        "timestamp": to_india_time(row[0]),
                         "ip_address": row[1],
                         "link_id": row[2],
                         "success": row[3],
