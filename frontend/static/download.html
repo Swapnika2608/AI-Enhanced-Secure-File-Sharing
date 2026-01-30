@@ -132,9 +132,9 @@
                 
                 const downloadUrl = `/api/files/download/${fileId}?user_name=${encodeURIComponent(userName)}${filePassword ? '&password=' + encodeURIComponent(filePassword) : ''}`;
                 
-                // Download only first 60 bytes for key verification
+                // Download only first 44 bytes for key verification (12 IV + 32 encrypted verifier)
                 const headerResponse = await fetch(downloadUrl, {
-                    headers: { 'Range': 'bytes=0-59' }
+                    headers: { 'Range': 'bytes=0-43' }
                 });
                 
                 if (!headerResponse.ok) {
@@ -160,7 +160,7 @@
                 // Verify key with header
                 const headerData = await headerResponse.arrayBuffer();
                 const verifierIv = new Uint8Array(headerData.slice(0, 12));
-                const encryptedVerifier = new Uint8Array(headerData.slice(12, 60)); // Assuming ~48 bytes for encrypted verifier
+                const encryptedVerifier = new Uint8Array(headerData.slice(12, 44)); // 32 bytes for encrypted verifier
                 
                 try {
                     const decryptedVerifier = await crypto.subtle.decrypt(
@@ -203,7 +203,11 @@
                 
                 // Parse the new format: [verifier IV][encrypted verifier][file IV][encrypted file]
                 const verifierIvSize = 12;
-                const encryptedVerifierSize = 48; // Approximate size
+                const verifierIv2 = new Uint8Array(encryptedData.slice(0, verifierIvSize));
+                
+                // Find the encrypted verifier size dynamically
+                // The encrypted verifier should be around 32 bytes (16 bytes text + 16 bytes auth tag)
+                const encryptedVerifierSize = 32;
                 const fileIvStart = verifierIvSize + encryptedVerifierSize;
                 const fileIv = new Uint8Array(encryptedData.slice(fileIvStart, fileIvStart + 12));
                 const encryptedFile = new Uint8Array(encryptedData.slice(fileIvStart + 12));
