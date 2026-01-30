@@ -638,7 +638,10 @@ async def init_database():
 async def register(email: str = Form(...), password: str = Form(...)):
     """Register new user"""
     try:
+        print(f"Registration attempt for: {email}")
         with get_db() as conn:
+            if not conn:
+                raise HTTPException(status_code=500, detail="Database connection failed")
             cursor = conn.cursor()
             
             # Check if user exists
@@ -648,6 +651,7 @@ async def register(email: str = Form(...), password: str = Form(...)):
             
             # Hash password
             password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+            print(f"Password hashed successfully")
             
             # Create user
             cursor.execute("""
@@ -657,31 +661,41 @@ async def register(email: str = Form(...), password: str = Form(...)):
             
             user_id = cursor.fetchone()[0]
             conn.commit()
+            print(f"User created with ID: {user_id}")
             
             # Create JWT token
             token = create_jwt_token(user_id, email)
+            print(f"JWT token created")
             
             return {"token": token, "user_id": user_id, "email": email}
             
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Registration error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/auth/login")
 async def login(email: str = Form(...), password: str = Form(...)):
     """User login with security monitoring"""
     try:
+        print(f"Login attempt for: {email}")
         with get_db() as conn:
+            if not conn:
+                raise HTTPException(status_code=500, detail="Database connection failed")
             cursor = conn.cursor()
             
             # Get user
             cursor.execute("SELECT id, password_hash FROM users WHERE email = %s AND is_active = true", (email,))
             user = cursor.fetchone()
+            print(f"User found: {user is not None}")
             
             # Log login attempt
             success = False
             if user and bcrypt.checkpw(password.encode(), user[1].encode()):
                 success = True
                 user_id = user[0]
+                print(f"Password verified for user {user_id}")
             
             cursor.execute("""
                 INSERT INTO login_attempts (email, timestamp, success, ip_address)
@@ -690,6 +704,7 @@ async def login(email: str = Form(...), password: str = Form(...)):
             
             if not success:
                 conn.commit()
+                print(f"Login failed for {email}")
                 raise HTTPException(status_code=401, detail="Invalid credentials")
             
             # Create session
@@ -703,12 +718,14 @@ async def login(email: str = Form(...), password: str = Form(...)):
             
             # Create JWT token
             token = create_jwt_token(user_id, email)
+            print(f"Login successful for {email}")
             
             return {"token": token, "user_id": user_id, "email": email}
             
     except HTTPException:
         raise
     except Exception as e:
+        print(f"Login error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/files/upload")

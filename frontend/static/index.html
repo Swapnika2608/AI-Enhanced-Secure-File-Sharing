@@ -356,7 +356,7 @@
                 const fileIv = crypto.getRandomValues(new Uint8Array(12));
                 const fileData = await file.arrayBuffer();
                 
-                const encryptedFile = await crypto.subtle.encrypt(
+                const encryptedFileData = await crypto.subtle.encrypt(
                     { name: 'AES-GCM', iv: fileIv },
                     key,
                     fileData
@@ -365,13 +365,13 @@
                 // Combine: [verifier IV][encrypted verifier][file IV][encrypted file]
                 const combined = new Uint8Array(
                     verifierIv.length + encryptedVerifier.byteLength + 
-                    fileIv.length + encryptedFile.byteLength
+                    fileIv.length + encryptedFileData.byteLength
                 );
                 let offset = 0;
                 combined.set(verifierIv, offset); offset += verifierIv.length;
                 combined.set(new Uint8Array(encryptedVerifier), offset); offset += encryptedVerifier.byteLength;
                 combined.set(fileIv, offset); offset += fileIv.length;
-                combined.set(new Uint8Array(encryptedFile), offset);
+                combined.set(new Uint8Array(encryptedFileData), offset);
                 
                 // Create encrypted file
                 const encryptedFile = new File([combined], file.name + '.encrypted', {
