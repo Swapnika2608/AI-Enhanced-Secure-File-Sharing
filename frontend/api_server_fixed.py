@@ -27,13 +27,13 @@ try:
     if 'dbname' in DB_CONFIG:
         DB_CONFIG['database'] = DB_CONFIG.pop('dbname')
 except ImportError:
-    # Fallback database config
+    # Use environment variables for production (Render)
     DB_CONFIG = {
-        'host': 'localhost',
-        'port': 5432,
-        'database': 'blindsend_test',
-        'user': 'postgres',
-        'password': 'Swapnika2608'
+        'host': os.environ.get('DB_HOST', 'localhost'),
+        'port': int(os.environ.get('DB_PORT', 5432)),
+        'database': os.environ.get('DB_NAME', 'blindsend_test'),
+        'user': os.environ.get('DB_USER', 'postgres'),
+        'password': os.environ.get('DB_PASSWORD', 'Swapnika2608')
     }
 # AI imports
 try:
@@ -141,7 +141,7 @@ else:
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Keep open for now, restrict later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -151,8 +151,16 @@ app.add_middleware(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 
+# Debug: Print paths
+print(f"BASE_DIR: {BASE_DIR}")
+print(f"STATIC_DIR: {STATIC_DIR}")
+print(f"Static dir exists: {os.path.isdir(STATIC_DIR)}")
+
 if os.path.isdir(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    print(f"Mounted static files from: {STATIC_DIR}")
+else:
+    print(f"Static directory not found: {STATIC_DIR}")
 
 @app.get("/favicon.ico")
 async def favicon():
@@ -160,7 +168,7 @@ async def favicon():
     return FileResponse("favicon.ico")
 
 # JWT settings
-JWT_SECRET = "your-secret-key-change-in-production"
+JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production')
 JWT_ALGORITHM = "HS256"
 
 def get_db():
@@ -199,8 +207,24 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 async def home():
     """Serve main page"""
     try:
-        with open("static/index.html", "r", encoding="utf-8") as f:
-            return HTMLResponse(f.read())
+        # Try multiple possible paths for the static file
+        static_paths = [
+            "static/index.html",
+            "frontend/static/index.html", 
+            "./static/index.html",
+            os.path.join(os.path.dirname(__file__), "static", "index.html")
+        ]
+        
+        for path in static_paths:
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return HTMLResponse(f.read())
+            except FileNotFoundError:
+                continue
+                
+        # If no file found, return fallback
+        raise FileNotFoundError("No index.html found")
+        
     except FileNotFoundError:
         return HTMLResponse("""
         <!DOCTYPE html>
