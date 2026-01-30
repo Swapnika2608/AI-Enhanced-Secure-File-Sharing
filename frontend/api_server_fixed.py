@@ -37,7 +37,7 @@ except ImportError:
         DB_CONFIG = {
             'host': parsed.hostname,
             'port': parsed.port or 5432,
-            'database': parsed.path[1:],  # Remove leading /
+            'dbname': parsed.path[1:],  # Remove leading /
             'user': parsed.username,
             'password': parsed.password
         }
@@ -45,7 +45,7 @@ except ImportError:
         DB_CONFIG = {
             'host': os.environ.get('DB_HOST', 'localhost'),
             'port': int(os.environ.get('DB_PORT', 5432)),
-            'database': os.environ.get('DB_NAME', 'blindsend_test'),
+            'dbname': os.environ.get('DB_NAME', 'blindsend_test'),
             'user': os.environ.get('DB_USER', 'postgres'),
             'password': os.environ.get('DB_PASSWORD', 'Swapnika2608')
         }
@@ -192,10 +192,10 @@ JWT_ALGORITHM = "HS256"
 def get_db():
     """Database connection"""
     try:
-        # Convert dbname to database for psycopg2
+        # Use dbname for psycopg3 (not database)
         db_config = DB_CONFIG.copy()
-        if 'dbname' in db_config:
-            db_config['database'] = db_config.pop('dbname')
+        if 'database' in db_config:
+            db_config['dbname'] = db_config.pop('database')
         
         # Debug: Print connection details (without password)
         debug_config = db_config.copy()
