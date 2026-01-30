@@ -68,13 +68,13 @@
                 <h3>📋 Decryption Process</h3>
                 <div class="step">
                     <span class="step-number">1</span>
-                    <strong>Downloading encrypted file...</strong>
-                    <div id="download-status">Preparing download...</div>
+                    <strong>Verifying decryption key...</strong>
+                    <div id="download-status">Preparing verification...</div>
                 </div>
                 <div class="step">
                     <span class="step-number">2</span>
-                    <strong>Decrypting file content...</strong>
-                    <div id="decrypt-status">Waiting for download...</div>
+                    <strong>Downloading & decrypting file...</strong>
+                    <div id="decrypt-status">Waiting for verification...</div>
                 </div>
                 <div class="step">
                     <span class="step-number">3</span>
@@ -112,7 +112,11 @@
 
             // Test if the key is valid base64
             try {
-                atob(decryptionKey);
+                const testKeyData = atob(decryptionKey);
+                if (testKeyData.length !== 32) {
+                    showAlert('Invalid decryption key format. Key must decode to 32 bytes.', 'error');
+                    return;
+                }
             } catch (e) {
                 showAlert('Invalid decryption key format. Please check the key and try again.', 'error');
                 return;
@@ -123,24 +127,20 @@
                 document.getElementById('download-form').classList.add('hidden');
                 document.getElementById('decryption-steps').classList.remove('hidden');
                 
-                // Step 1: Download encrypted file
-                document.getElementById('download-status').textContent = 'Downloading encrypted file...';
+                // Step 1: Fast key verification
+                document.getElementById('download-status').textContent = 'Verifying decryption key...';
                 
                 const downloadUrl = `/api/files/download/${fileId}?user_name=${encodeURIComponent(userName)}${filePassword ? '&password=' + encodeURIComponent(filePassword) : ''}`;
                 
-                const response = await fetch(downloadUrl);
+                // Download only first 60 bytes for key verification
+                const headerResponse = await fetch(downloadUrl, {
+                    headers: { 'Range': 'bytes=0-59' }
+                });
                 
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ detail: 'Download failed' }));
+                if (!headerResponse.ok) {
+                    const errorData = await headerResponse.json().catch(() => ({ detail: 'Download failed' }));
                     throw new Error(errorData.detail || 'Download failed');
                 }
-                
-                document.getElementById('download-status').innerHTML = '✅ Encrypted file downloaded successfully';
-                
-                // Step 2: Decrypt file
-                document.getElementById('decrypt-status').textContent = 'Decrypting file content...';
-                
-                const encryptedData = await response.arrayBuffer();
                 
                 // Import the decryption key
                 let keyData, cryptoKey;
@@ -157,27 +157,67 @@
                     throw new Error('Invalid decryption key format');
                 }
                 
-                // Extract IV and encrypted content
-                const iv = new Uint8Array(encryptedData.slice(0, 12));
-                const encrypted = new Uint8Array(encryptedData.slice(12));
+                // Verify key with header
+                const headerData = await headerResponse.arrayBuffer();
+                const verifierIv = new Uint8Array(headerData.slice(0, 12));
+                const encryptedVerifier = new Uint8Array(headerData.slice(12, 60)); // Assuming ~48 bytes for encrypted verifier
                 
-                // Decrypt the file
-                let decrypted;
                 try {
-                    decrypted = await crypto.subtle.decrypt(
-                        { name: 'AES-GCM', iv: iv },
+                    const decryptedVerifier = await crypto.subtle.decrypt(
+                        { name: 'AES-GCM', iv: verifierIv },
                         cryptoKey,
-                        encrypted
+                        encryptedVerifier
                     );
-                } catch (decryptError) {
-                    // Report decryption failure to server for security tracking
+                    const verifierText = new TextDecoder().decode(decryptedVerifier);
+                    
+                    if (verifierText !== "BLINDSEND_KEY_OK") {
+                        throw new Error('Key verification failed');
+                    }
+                } catch (verifyError) {
+                    // Report decryption failure immediately
                     fetch(`/api/files/report-decrypt-failure/${fileId}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ user_name: userName, failure_type: 'decryption' })
                     }).catch(() => {});
                     
-                    throw new Error('Decryption failed - invalid key or corrupted file');
+                    throw new Error('Invalid decryption key - verification failed');
+                }
+                
+                document.getElementById('download-status').innerHTML = '✅ Key verified successfully';
+                
+                // Step 2: Download full encrypted file
+                document.getElementById('decrypt-status').textContent = 'Downloading encrypted file...';
+                
+                const response = await fetch(downloadUrl);
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ detail: 'Download failed' }));
+                    throw new Error(errorData.detail || 'Download failed');
+                }
+                
+                document.getElementById('decrypt-status').innerHTML = '✅ File downloaded - decrypting...';
+                
+                // Step 3: Decrypt file
+                const encryptedData = await response.arrayBuffer();
+                
+                // Parse the new format: [verifier IV][encrypted verifier][file IV][encrypted file]
+                const verifierIvSize = 12;
+                const encryptedVerifierSize = 48; // Approximate size
+                const fileIvStart = verifierIvSize + encryptedVerifierSize;
+                const fileIv = new Uint8Array(encryptedData.slice(fileIvStart, fileIvStart + 12));
+                const encryptedFile = new Uint8Array(encryptedData.slice(fileIvStart + 12));
+                
+                // Decrypt the file
+                let decrypted;
+                try {
+                    decrypted = await crypto.subtle.decrypt(
+                        { name: 'AES-GCM', iv: fileIv },
+                        cryptoKey,
+                        encryptedFile
+                    );
+                } catch (decryptError) {
+                    throw new Error('File decryption failed - corrupted file');
                 }
                 
                 document.getElementById('decrypt-status').innerHTML = '✅ File decrypted successfully';

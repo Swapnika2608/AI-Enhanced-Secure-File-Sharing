@@ -343,20 +343,35 @@
                     throw new Error('Key generation failed - invalid length');
                 }
                 
+                // Create key verification header
+                const keyVerifier = new TextEncoder().encode("BLINDSEND_KEY_OK");
+                const verifierIv = crypto.getRandomValues(new Uint8Array(12));
+                const encryptedVerifier = await crypto.subtle.encrypt(
+                    { name: 'AES-GCM', iv: verifierIv },
+                    key,
+                    keyVerifier
+                );
+                
                 // Encrypt file
-                const iv = crypto.getRandomValues(new Uint8Array(12));
+                const fileIv = crypto.getRandomValues(new Uint8Array(12));
                 const fileData = await file.arrayBuffer();
                 
-                const encrypted = await crypto.subtle.encrypt(
-                    { name: 'AES-GCM', iv: iv },
+                const encryptedFile = await crypto.subtle.encrypt(
+                    { name: 'AES-GCM', iv: fileIv },
                     key,
                     fileData
                 );
                 
-                // Combine IV + encrypted data
-                const combined = new Uint8Array(iv.length + encrypted.byteLength);
-                combined.set(iv);
-                combined.set(new Uint8Array(encrypted), iv.length);
+                // Combine: [verifier IV][encrypted verifier][file IV][encrypted file]
+                const combined = new Uint8Array(
+                    verifierIv.length + encryptedVerifier.byteLength + 
+                    fileIv.length + encryptedFile.byteLength
+                );
+                let offset = 0;
+                combined.set(verifierIv, offset); offset += verifierIv.length;
+                combined.set(new Uint8Array(encryptedVerifier), offset); offset += encryptedVerifier.byteLength;
+                combined.set(fileIv, offset); offset += fileIv.length;
+                combined.set(new Uint8Array(encryptedFile), offset);
                 
                 // Create encrypted file
                 const encryptedFile = new File([combined], file.name + '.encrypted', {

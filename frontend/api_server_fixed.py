@@ -88,9 +88,11 @@ def send_security_alert_email(user_email: str, alert_message: str, link_id: str)
     try:
         # Application owner's Gmail SMTP configuration
         smtp_server = "smtp.gmail.com"
-        smtp_port = 587
+        smtp_port = 465  # Use SSL port instead of STARTTLS
         sender_email = os.environ.get('SMTP_EMAIL')
         sender_password = os.environ.get('SMTP_PASSWORD')
+        
+        print(f"SMTP Config - Server: {smtp_server}, Port: {smtp_port}, Email: {sender_email}, Password: {'***' if sender_password else 'None'}")
         
         if not sender_email or not sender_password:
             print("SMTP credentials not found in environment variables")
@@ -130,8 +132,9 @@ veerlapatiswapnika26@gmail.com
         
         msg.attach(MIMEText(body, 'plain'))
         
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()
+        # Use SMTP_SSL for port 465
+        print(f"Attempting SSL connection to {smtp_server}:{smtp_port}")
+        server = smtplib.SMTP_SSL(smtp_server, smtp_port)
         server.login(sender_email, sender_password)
         server.send_message(msg)
         server.quit()
@@ -765,10 +768,12 @@ async def report_decrypt_failure(link_id: str, request: Request):
             
             total_failed_count = cursor.fetchone()[0]
             
-            print(f"Security tracking: User '{user_name}' has {total_failed_count} total failures for link {link_id}")
+            print(f"🔍 DEBUG: User '{user_name}' has {total_failed_count} total failures for link {link_id}")
+            print(f"🔍 DEBUG: Threshold check: {total_failed_count} >= 3 = {total_failed_count >= 3}")
             
             if total_failed_count >= 3:
-                print(f"ALERT THRESHOLD REACHED: {total_failed_count} failures >= 3")
+                print(f"🚨 ALERT THRESHOLD REACHED: {total_failed_count} failures >= 3")
+                print(f"🔍 DEBUG: EMAIL TRIGGERED - Processing alert...")
                 # Get file owner and send security alert
                 cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
                 owner_result = cursor.fetchone()
@@ -806,9 +811,15 @@ async def report_decrypt_failure(link_id: str, request: Request):
                         
                         # Send email alert
                         try:
+                            print(f"📧 DEBUG: Attempting to send email to {owner_email}")
+                            print(f"📧 DEBUG: SMTP_EMAIL = {os.environ.get('SMTP_EMAIL', 'NOT SET')}")
+                            print(f"📧 DEBUG: SMTP_PASSWORD = {'SET' if os.environ.get('SMTP_PASSWORD') else 'NOT SET'}")
+                            
                             email_sent = send_security_alert_email(owner_email, alert_msg, link_id)
+                            print(f"📧 DEBUG: Email send result: {email_sent}")
                             print(f"Security alert created for user {owner_id}, email sent: {email_sent}")
                         except Exception as email_error:
+                            print(f"❌ DEBUG: Email send failed with error: {email_error}")
                             print(f"Failed to send security alert email: {email_error}")
             
             conn.commit()
@@ -1328,4 +1339,5 @@ async def debug_security():
             
     except Exception as e:
         return {"error": str(e)}
+
 
