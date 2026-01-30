@@ -165,7 +165,11 @@ else:
 @app.get("/favicon.ico")
 async def favicon():
     """Serve favicon"""
-    return FileResponse("favicon.ico")
+    try:
+        return FileResponse(os.path.join(BASE_DIR, "favicon.ico"))
+    except:
+        # Return a simple response if favicon not found
+        return HTMLResponse("")
 
 # JWT settings
 JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production')
@@ -207,12 +211,17 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 async def home():
     """Serve main page"""
     try:
-        # Try multiple possible paths for the static file
+        # Try the correct path since we know static dir exists
+        index_path = os.path.join(STATIC_DIR, "index.html")
+        if os.path.exists(index_path):
+            with open(index_path, "r", encoding="utf-8") as f:
+                return HTMLResponse(f.read())
+        
+        # Fallback paths
         static_paths = [
             "static/index.html",
             "frontend/static/index.html", 
-            "./static/index.html",
-            os.path.join(os.path.dirname(__file__), "static", "index.html")
+            "./static/index.html"
         ]
         
         for path in static_paths:
