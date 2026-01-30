@@ -370,14 +370,25 @@ async def download_page(file_id: str):
                     const encrypted = new Uint8Array(encryptedData.slice(12));
                     const decrypted = await crypto.subtle.decrypt({{ name: 'AES-GCM', iv: iv }}, cryptoKey, encrypted);
                     
+                    // Get original filename from the server response
                     let filename = 'decrypted_file';
+                    
+                    // Try to get filename from Content-Disposition header
                     const contentDisposition = response.headers.get('content-disposition');
                     if (contentDisposition) {{
-                        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
-                        if (filenameMatch) {{
-                            filename = filenameMatch[1];
-                            if (filename.endsWith('.encrypted')) filename = filename.slice(0, -10);
+                        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                        if (filenameMatch && filenameMatch[1]) {{
+                            filename = filenameMatch[1].replace(/["']/g, '');
+                            // Remove .encrypted extension if present
+                            if (filename.endsWith('.encrypted')) {{
+                                filename = filename.slice(0, -10);
+                            }}
                         }}
+                    }}
+                    
+                    // If no filename from headers, try to extract from file ID or use default
+                    if (filename === 'decrypted_file') {{
+                        filename = 'file_{file_id}';
                     }}
                     
                     const blob = new Blob([decrypted]);
