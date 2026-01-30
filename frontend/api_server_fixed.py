@@ -64,8 +64,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import requests
-import pytz
-from datetime import timezone
+from datetime import timezone, timedelta
 
 def send_security_alert_email(user_email: str, alert_message: str, link_id: str):
     """Send security alert email from application owner to file owner"""
@@ -85,9 +84,9 @@ def send_security_alert_email(user_email: str, alert_message: str, link_id: str)
         msg['To'] = user_email  # File owner (recipient)
         msg['Subject'] = "🚨 BlindSend Security Alert - Suspicious Activity on Your File"
         
-        # Get local time (India timezone)
-        local_tz = pytz.timezone('Asia/Kolkata')
-        local_time = datetime.now(local_tz)
+        # Get local time (India timezone UTC+5:30)
+        india_tz = timezone(timedelta(hours=5, minutes=30))
+        local_time = datetime.now(india_tz)
         
         body = f"""
 Dear BlindSend User,
