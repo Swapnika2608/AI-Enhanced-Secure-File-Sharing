@@ -64,6 +64,8 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import requests
+import pytz
+from datetime import timezone
 
 def send_security_alert_email(user_email: str, alert_message: str, link_id: str):
     """Send security alert email from application owner to file owner"""
@@ -83,6 +85,10 @@ def send_security_alert_email(user_email: str, alert_message: str, link_id: str)
         msg['To'] = user_email  # File owner (recipient)
         msg['Subject'] = "🚨 BlindSend Security Alert - Suspicious Activity on Your File"
         
+        # Get local time (India timezone)
+        local_tz = pytz.timezone('Asia/Kolkata')
+        local_time = datetime.now(local_tz)
+        
         body = f"""
 Dear BlindSend User,
 
@@ -90,7 +96,7 @@ We detected suspicious activity on one of your shared files:
 
 🔍 SECURITY ALERT: {alert_message}
 📁 File Link ID: {link_id}
-⏰ Detection Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+⏰ Detection Time: {local_time.strftime('%m/%d/%Y, %I:%M:%S %p')}
 
 Someone may be trying to access your file without proper authorization. 
 If this activity seems suspicious, we recommend:
@@ -215,12 +221,7 @@ def get_db():
             db_config['dbname'] = db_config.pop('database')
         
         # Debug: Print connection details (without password)
-        debug_config = db_config.copy()
-        debug_config['password'] = '***'
-        print(f"Attempting DB connection with: {debug_config}")
-        
         conn = psycopg.connect(**db_config)
-        print("Database connection successful!")
         return conn
     except Exception as e:
         print(f"Database connection failed: {e}")
@@ -775,11 +776,12 @@ async def report_decrypt_failure(link_id: str, request: Request):
                         """, (link_id, user_name))
                         
                         failure_breakdown = dict(cursor.fetchall())
-                        password_fails = failure_breakdown.get('download', 0) + failure_breakdown.get('password_failure', 0)
-                        decrypt_fails = failure_breakdown.get('decryption_failure', 0) + failure_breakdown.get('decrypt_failure', 0)
+                        password_fails = failure_breakdown.get('password_failure', 0)
+                        decrypt_fails = failure_breakdown.get('decryption_failure', 0)
                         both_fails = failure_breakdown.get('both_failure', 0)
+                        combined_fails = total_failed_count  # Use total count as combined failures
                         
-                        alert_msg = f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed attempts on your file - {password_fails} password failures, {decrypt_fails} decryption failures, {both_fails} combined failures"
+                        alert_msg = f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed attempts on your file - {password_fails} password failures, {decrypt_fails} decryption failures, {combined_fails} combined failures"
                         
                         cursor.execute("""
                             INSERT INTO security_alerts (user_id, alert_type, severity, message, link_id, created_at)
@@ -830,7 +832,7 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
                 cursor.execute("""
                     INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """, (link_id, client_ip, datetime.now(), "download", False, 0.8, user_name))
+                """, (link_id, client_ip, datetime.now(), "password_failure", False, 0.8, user_name))
                 conn.commit()
                 raise HTTPException(status_code=401, detail="Invalid password")
             
@@ -975,7 +977,7 @@ async def get_user_activity(
             downloads = []
             alerts = []
             
-            print(f"Getting activity for user_id: {user_data['user_id']}, page: {page}, limit: {limit}")
+            print(f"Getting activity for user_id: {user_data['user_id']}")
             
             try:
                 # Get uploads with pagination
@@ -989,7 +991,6 @@ async def get_user_activity(
                 """, (user_data["user_id"], limit, offset))
                 
                 rows = cursor.fetchall()
-                print(f"Found {len(rows)} upload records")
                 
                 for row in rows:
                     metadata = row[1] if isinstance(row[1], dict) else (json.loads(row[1]) if row[1] else {})
@@ -999,7 +1000,6 @@ async def get_user_activity(
                         "link_id": row[2]
                     }
                     uploads.append(upload_data)
-                    print(f"Added upload: {upload_data}")
                 
                 # Get total upload count
                 cursor.execute("""
@@ -1084,7 +1084,6 @@ async def get_user_activity(
                         "upload_date": row[4].isoformat() if row[4] else None
                     }
                     file_stats.append(file_stat)
-                    print(f"File stat: {file_stat}")
                 
                 analytics["file_statistics"] = file_stats
                 
