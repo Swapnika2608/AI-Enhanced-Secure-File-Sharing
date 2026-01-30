@@ -1,1 +1,45 @@
-*.DS_Store
+# Uploaded files (encrypted or not)
+uploads/
+*.encrypted
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.env
+
+# AI Models
+models/
+*.pkl
+*.joblib
+*.h5
+*.model
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+temp/
