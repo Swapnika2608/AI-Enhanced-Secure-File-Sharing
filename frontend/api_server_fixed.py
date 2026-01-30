@@ -66,29 +66,40 @@ from email.mime.multipart import MIMEMultipart
 import requests
 
 def send_security_alert_email(user_email: str, alert_message: str, link_id: str):
-    """Send security alert email to user"""
+    """Send security alert email from application owner to file owner"""
     try:
-        # Gmail SMTP configuration (you can change this)
+        # Application owner's Gmail SMTP configuration
         smtp_server = "smtp.gmail.com"
         smtp_port = 587
-        sender_email = "veerlapatiswapnika26@gmail.com"  # Your Gmail
-        sender_password = "qnuu jrvv qovg gxsl"  # Your app password
+        sender_email = "veerlapatiswapnika26@gmail.com"  # Application owner (sender)
+        sender_password = "qnuu jrvv qovg gxsl"  # App password
         
         msg = MIMEMultipart()
         msg['From'] = sender_email
-        msg['To'] = user_email
-        msg['Subject'] = "🚨 Security Alert - Blindsend"
+        msg['To'] = user_email  # File owner (recipient)
+        msg['Subject'] = "🚨 BlindSend Security Alert - Suspicious Activity on Your File"
         
         body = f"""
-        Security Alert for your file sharing link!
-        
-        Alert: {alert_message}
-        Link ID: {link_id}
-        Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-        
-        If this wasn't you, consider revoking the link immediately.
-        
-        - Blindsend Security Team
+Dear BlindSend User,
+
+We detected suspicious activity on one of your shared files:
+
+🔍 SECURITY ALERT: {alert_message}
+📁 File Link ID: {link_id}
+⏰ Detection Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+Someone may be trying to access your file without proper authorization. 
+If this activity seems suspicious, we recommend:
+
+1. Review who has access to your file link
+2. Consider revoking the link if necessary
+3. Change your file password if you suspect it's compromised
+
+You can manage your files by logging into your BlindSend account.
+
+Stay secure,
+BlindSend Security Team
+veerlapatiswapnika26@gmail.com
         """
         
         msg.attach(MIMEText(body, 'plain'))
@@ -99,10 +110,10 @@ def send_security_alert_email(user_email: str, alert_message: str, link_id: str)
         server.send_message(msg)
         server.quit()
         
-        print(f"Security alert email sent to {user_email}")
+        print(f"Security alert email sent from {sender_email} to {user_email}")
         return True
     except Exception as e:
-        print(f"Failed to send email: {e}")
+        print(f"Failed to send security alert email: {e}")
         return False
 
 def get_client_ip(request: Request) -> str:
@@ -702,27 +713,20 @@ async def report_decrypt_failure(link_id: str, request: Request):
     try:
         data = await request.json()
         user_name = data.get('user_name', 'Anonymous')
+        failure_type = data.get('failure_type', 'decryption')  # 'password', 'decryption', or 'both'
         client_ip = get_client_ip(request)
         
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # Log the decryption failure
+            # Log the failure with specific type
+            access_type = f"{failure_type}_failure"
             cursor.execute("""
                 INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (link_id, client_ip, datetime.now(), "decrypt_failure", False, 0.9, user_name))
+            """, (link_id, client_ip, datetime.now(), access_type, False, 0.9, user_name))
             
-            # Check for multiple failed decryption attempts
-            cursor.execute("""
-                SELECT COUNT(*) FROM access_attempts 
-                WHERE link_id = %s AND user_name = %s AND access_type = 'decrypt_failure' AND success = false 
-                AND timestamp > NOW() - INTERVAL '1 hour'
-            """, (link_id, user_name))
-            
-            failed_count = cursor.fetchone()[0]
-            
-            # Check for multiple failed attempts (combined password + decryption failures)
+            # Check for multiple failed attempts (combined all failure types)
             cursor.execute("""
                 SELECT COUNT(*) FROM access_attempts 
                 WHERE link_id = %s AND user_name = %s AND success = false 
@@ -730,6 +734,8 @@ async def report_decrypt_failure(link_id: str, request: Request):
             """, (link_id, user_name))
             
             total_failed_count = cursor.fetchone()[0]
+            
+            print(f"Security tracking: User '{user_name}' has {total_failed_count} total failures for link {link_id}")
             
             if total_failed_count >= 3:
                 # Get file owner and send security alert
@@ -753,25 +759,27 @@ async def report_decrypt_failure(link_id: str, request: Request):
                         """, (link_id, user_name))
                         
                         failure_breakdown = dict(cursor.fetchall())
-                        password_fails = failure_breakdown.get('download', 0)
-                        decrypt_fails = failure_breakdown.get('decrypt_failure', 0)
+                        password_fails = failure_breakdown.get('download', 0) + failure_breakdown.get('password_failure', 0)
+                        decrypt_fails = failure_breakdown.get('decrypt_failure', 0) + failure_breakdown.get('decryption_failure', 0)
+                        both_fails = failure_breakdown.get('both_failure', 0)
                         
-                        alert_msg = f"User '{user_name}' made {total_failed_count} failed attempts ({password_fails} password, {decrypt_fails} decryption) on your file"
+                        alert_msg = f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed attempts on your file - {password_fails} password failures, {decrypt_fails} decryption failures, {both_fails} combined failures"
                         
                         cursor.execute("""
                             INSERT INTO security_alerts (user_id, alert_type, severity, message, link_id, created_at)
                             VALUES (%s, %s, %s, %s, %s, %s)
-                        """, (owner_id, "suspicious_access_attempts", "medium", alert_msg, link_id, datetime.now()))
+                        """, (owner_id, "suspicious_access_attempts", "high", alert_msg, link_id, datetime.now()))
                         
                         # Send email alert
-                        send_security_alert_email(owner_email, alert_msg, link_id)
+                        email_sent = send_security_alert_email(owner_email, alert_msg, link_id)
+                        print(f"Security alert created for user {owner_id}, email sent: {email_sent}")
             
             conn.commit()
-            return {"status": "logged"}
+            return {"status": "logged", "total_failures": total_failed_count}
             
     except Exception as e:
         print(f"Error logging decrypt failure: {e}")
-        return {"status": "error"}
+        return {"status": "error", "error": str(e)}
 
 @app.get("/api/files/download/{link_id}")
 async def download_file(link_id: str, request: Request, password: Optional[str] = None, user_name: Optional[str] = None):
@@ -1231,100 +1239,48 @@ async def get_user_threat_analysis(user_id: int, admin_data: dict = Depends(veri
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Threat analysis error: {str(e)}")
-            
-        cursor.execute("""
-                INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (link_id, client_ip, datetime.now(), "download", True, 0.1, user_name))
-            
-        conn.commit()
-            
-        for filename in os.listdir("uploads"):
-                if filename.startswith(f"{link_id}_"):
-                    return FileResponse(f"uploads/{filename}", filename=filename.split("_", 1)[1])
-            
-        raise HTTPException(status_code=404, detail="File not found on disk")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/files/revoke/{link_id}")
-async def revoke_access(link_id: str, user_data: dict = Depends(verify_token)):
-    """Revoke access to a file"""
+@app.get("/api/debug/security")
+async def debug_security():
+    """Debug endpoint to check security alerts and access attempts"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
             
-            cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
-            result = cursor.fetchone()
-            if not result or result[0] != user_data["user_id"]:
-                raise HTTPException(status_code=403, detail="Not authorized")
+            # Check security alerts
+            cursor.execute("SELECT COUNT(*) FROM security_alerts")
+            alerts_count = cursor.fetchone()[0]
             
-            cursor.execute("UPDATE link_access_controls SET is_revoked = true WHERE link_id = %s", (link_id,))
-            conn.commit()
-            return {"message": "Access revoked successfully"}
+            cursor.execute("SELECT * FROM security_alerts ORDER BY created_at DESC LIMIT 5")
+            recent_alerts = cursor.fetchall()
             
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/user/activity")
-async def get_user_activity(user_data: dict = Depends(verify_token)):
-    """Get user activity"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
+            # Check access attempts
+            cursor.execute("SELECT COUNT(*) FROM access_attempts")
+            attempts_count = cursor.fetchone()[0]
             
-            cursor.execute("""
-                SELECT ae.timestamp, ae.metadata, ae.link_id
-                FROM audit_events ae
-                WHERE ae.link_id IN (
-                    SELECT ul.link_id FROM user_links ul WHERE ul.user_id = %s
-                ) AND ae.event_type = 'file_upload'
-                ORDER BY ae.timestamp DESC LIMIT 10
-            """, (user_data["user_id"],))
+            cursor.execute("SELECT * FROM access_attempts ORDER BY timestamp DESC LIMIT 5")
+            recent_attempts = cursor.fetchall()
             
-            uploads = []
-            for row in cursor.fetchall():
-                metadata = row[1] if isinstance(row[1], dict) else (json.loads(row[1]) if row[1] else {})
-                uploads.append({
-                    "timestamp": row[0].isoformat(),
-                    "filename": metadata.get("filename", "unknown"),
-                    "link_id": row[2]
-                })
-            
-            cursor.execute("""
-                SELECT aa.timestamp, aa.ip_address, aa.link_id, aa.success, aa.user_name
-                FROM access_attempts aa
-                WHERE aa.link_id IN (
-                    SELECT ul.link_id FROM user_links ul WHERE ul.user_id = %s
-                ) AND aa.access_type = 'download'
-                ORDER BY aa.timestamp DESC LIMIT 10
-            """, (user_data["user_id"],))
-            
-            downloads = []
-            for row in cursor.fetchall():
-                downloads.append({
-                    "timestamp": row[0].isoformat(),
-                    "ip_address": row[1],
-                    "link_id": row[2],
-                    "success": row[3],
-                    "user_name": row[4] or "Anonymous",
-                    "location": get_location_from_ip(row[1])
-                })
+            # Check users
+            cursor.execute("SELECT COUNT(*) FROM users")
+            users_count = cursor.fetchone()[0]
             
             return {
-                "user_id": user_data["user_id"],
-                "email": user_data["email"],
-                "recent_uploads": uploads,
-                "recent_downloads": downloads
+                "security_alerts": {
+                    "count": alerts_count,
+                    "recent": [dict(zip(["id", "user_id", "alert_type", "severity", "message", "link_id", "created_at"], alert)) for alert in recent_alerts]
+                },
+                "access_attempts": {
+                    "count": attempts_count,
+                    "recent": [dict(zip(["id", "link_id", "ip_address", "timestamp", "access_type", "success", "risk_score", "user_name"], attempt)) for attempt in recent_attempts]
+                },
+                "users_count": users_count,
+                "database_connection": "working",
+                "timestamp": datetime.now().isoformat()
             }
             
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn

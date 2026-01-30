@@ -169,7 +169,14 @@
                         cryptoKey,
                         encrypted
                     );
-                } catch (e) {
+                } catch (decryptError) {
+                    // Report decryption failure to server for security tracking
+                    fetch(`/api/files/report-decrypt-failure/${fileId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_name: userName, failure_type: 'decryption' })
+                    }).catch(() => {});
+                    
                     throw new Error('Decryption failed - invalid key or corrupted file');
                 }
                 
@@ -216,8 +223,28 @@
                 
                 if (error.message.includes('Invalid password')) {
                     showAlert('❌ Incorrect password. Please check the password and try again.', 'error');
-                } else if (error.message.includes('Invalid decryption key') || error.message.includes('decrypt')) {
+                    // Report password failure to server for security tracking
+                    fetch(`/api/files/report-decrypt-failure/${fileId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_name: userName, failure_type: 'password' })
+                    }).catch(() => {});
+                } else if (error.message.includes('Decryption failed') || error.message.includes('invalid key')) {
                     showAlert('❌ Invalid decryption key. Please check the key and try again.', 'error');
+                    // Report decryption failure to server for security tracking
+                    fetch(`/api/files/report-decrypt-failure/${fileId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_name: userName, failure_type: 'decryption' })
+                    }).catch(() => {});
+                } else if (error.message.includes('Both password and decryption key')) {
+                    showAlert('❌ Both password and decryption key are incorrect. Please verify both and try again.', 'error');
+                    // Report both failures
+                    fetch(`/api/files/report-decrypt-failure/${fileId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_name: userName, failure_type: 'both' })
+                    }).catch(() => {});
                 } else {
                     showAlert('❌ Download failed: ' + error.message, 'error');
                 }
