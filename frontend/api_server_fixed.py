@@ -653,7 +653,7 @@ async def register(email: str = Form(...), password: str = Form(...)):
             cursor.execute("""
                 INSERT INTO users (email, password_hash, is_active, created_at)
                 VALUES (%s, %s, %s, %s) RETURNING id
-            """, (email, password_hash, True, datetime.now()))
+            """, (email, password_hash, True, utc_now()))
             
             user_id = cursor.fetchone()[0]
             conn.commit()
@@ -686,7 +686,7 @@ async def login(email: str = Form(...), password: str = Form(...)):
             cursor.execute("""
                 INSERT INTO login_attempts (email, timestamp, success, ip_address)
                 VALUES (%s, %s, %s, %s)
-            """, (email, datetime.now(), success, "127.0.0.1"))
+            """, (email, utc_now(), success, "127.0.0.1"))
             
             if not success:
                 conn.commit()
@@ -697,7 +697,7 @@ async def login(email: str = Form(...), password: str = Form(...)):
             cursor.execute("""
                 INSERT INTO user_sessions (user_id, session_id, created_at, last_activity, is_active, user_agent, device_fingerprint, ip_address)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (user_id, session_id, datetime.now(), datetime.now(), True, "web-browser", "web-device", "127.0.0.1"))
+            """, (user_id, session_id, utc_now(), utc_now(), True, "web-browser", "web-device", "127.0.0.1"))
             
             conn.commit()
             
@@ -735,9 +735,9 @@ async def upload_file(
             cursor.execute("""
                 INSERT INTO user_links (user_id, link_id, link_type, created_at)
                 VALUES (%s, %s, %s, %s)
-            """, (user_data["user_id"], link_id, 'file_share', datetime.now()))
+            """, (user_data["user_id"], link_id, 'file_share', utc_now()))
             
-            expires_at = datetime.now() + timedelta(hours=expires_hours)
+            expires_at = utc_now() + timedelta(hours=expires_hours)
             password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode() if password else None
             cursor.execute("""
                 INSERT INTO link_access_controls (link_id, max_downloads, custom_expires_at, is_revoked, password_hash)
@@ -748,7 +748,7 @@ async def upload_file(
                 INSERT INTO audit_events (event_type, link_id, ip_address, timestamp, success, metadata)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """, (
-                "file_upload", link_id, "127.0.0.1", datetime.now(), True,
+                "file_upload", link_id, "127.0.0.1", utc_now(), True,
                 json.dumps({
                     "filename": file.filename,
                     "file_size": len(content),
