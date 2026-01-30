@@ -369,6 +369,17 @@ async def download_page(file_id: str):
                     const iv = new Uint8Array(encryptedData.slice(0, 12));
                     const encrypted = new Uint8Array(encryptedData.slice(12));
                     const decrypted = await crypto.subtle.decrypt({{ name: 'AES-GCM', iv: iv }}, cryptoKey, encrypted);
+                }} catch (decryptError) {{
+                    // Report decryption failure to server for security tracking
+                    fetch(`/api/files/report-decrypt-failure/{file_id}`, {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ user_name: userName }})
+                    }}).catch(() => {{}});
+                    
+                    alert('❌ Decryption failed - Invalid decryption key');
+                    return;
+                }}
                     
                     // Get original filename from the server response
                     let filename = 'decrypted_file';
@@ -685,6 +696,83 @@ async def upload_file(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/files/report-decrypt-failure/{link_id}")
+async def report_decrypt_failure(link_id: str, request: Request):
+    """Report decryption failure for security tracking"""
+    try:
+        data = await request.json()
+        user_name = data.get('user_name', 'Anonymous')
+        client_ip = get_client_ip(request)
+        
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Log the decryption failure
+            cursor.execute("""
+                INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (link_id, client_ip, datetime.now(), "decrypt_failure", False, 0.9, user_name))
+            
+            # Check for multiple failed decryption attempts
+            cursor.execute("""
+                SELECT COUNT(*) FROM access_attempts 
+                WHERE link_id = %s AND user_name = %s AND access_type = 'decrypt_failure' AND success = false 
+                AND timestamp > NOW() - INTERVAL '1 hour'
+            """, (link_id, user_name))
+            
+            failed_count = cursor.fetchone()[0]
+            
+            # Check for multiple failed attempts (combined password + decryption failures)
+            cursor.execute("""
+                SELECT COUNT(*) FROM access_attempts 
+                WHERE link_id = %s AND user_name = %s AND success = false 
+                AND timestamp > NOW() - INTERVAL '1 hour'
+            """, (link_id, user_name))
+            
+            total_failed_count = cursor.fetchone()[0]
+            
+            if total_failed_count >= 3:
+                # Get file owner and send security alert
+                cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
+                owner_result = cursor.fetchone()
+                
+                if owner_result:
+                    owner_id = owner_result[0]
+                    cursor.execute("SELECT email FROM users WHERE id = %s", (owner_id,))
+                    owner_email_result = cursor.fetchone()
+                    
+                    if owner_email_result:
+                        owner_email = owner_email_result[0]
+                        
+                        # Get breakdown of failure types
+                        cursor.execute("""
+                            SELECT access_type, COUNT(*) FROM access_attempts 
+                            WHERE link_id = %s AND user_name = %s AND success = false 
+                            AND timestamp > NOW() - INTERVAL '1 hour'
+                            GROUP BY access_type
+                        """, (link_id, user_name))
+                        
+                        failure_breakdown = dict(cursor.fetchall())
+                        password_fails = failure_breakdown.get('download', 0)
+                        decrypt_fails = failure_breakdown.get('decrypt_failure', 0)
+                        
+                        alert_msg = f"User '{user_name}' made {total_failed_count} failed attempts ({password_fails} password, {decrypt_fails} decryption) on your file"
+                        
+                        cursor.execute("""
+                            INSERT INTO security_alerts (user_id, alert_type, severity, message, link_id, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                        """, (owner_id, "suspicious_access_attempts", "medium", alert_msg, link_id, datetime.now()))
+                        
+                        # Send email alert
+                        send_security_alert_email(owner_email, alert_msg, link_id)
+            
+            conn.commit()
+            return {"status": "logged"}
+            
+    except Exception as e:
+        print(f"Error logging decrypt failure: {e}")
+        return {"status": "error"}
+
 @app.get("/api/files/download/{link_id}")
 async def download_file(link_id: str, request: Request, password: Optional[str] = None, user_name: Optional[str] = None):
     """Download file with access monitoring"""
@@ -728,7 +816,7 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
             if download_count >= max_downloads:
                 raise HTTPException(status_code=403, detail="Download limit exceeded")
             
-            # Check for multiple failed attempts and create security alert
+            # Check for multiple failed attempts (combined password + decryption failures)
             if password_hash and password and not bcrypt.checkpw(password.encode(), password_hash.encode()):
                 cursor.execute("""
                     SELECT COUNT(*) FROM access_attempts 
@@ -736,8 +824,8 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
                     AND timestamp > NOW() - INTERVAL '1 hour'
                 """, (link_id, user_name))
                 
-                failed_count = cursor.fetchone()[0]
-                if failed_count > 3:
+                total_failed_count = cursor.fetchone()[0]
+                if total_failed_count >= 3:
                     # Get file owner
                     cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
                     owner_result = cursor.fetchone()
@@ -749,12 +837,25 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
                         
                         if owner_email_result:
                             owner_email = owner_email_result[0]
-                            alert_msg = f"User '{user_name}' made {failed_count} failed password attempts on your file"
+                            
+                            # Get breakdown of failure types
+                            cursor.execute("""
+                                SELECT access_type, COUNT(*) FROM access_attempts 
+                                WHERE link_id = %s AND user_name = %s AND success = false 
+                                AND timestamp > NOW() - INTERVAL '1 hour'
+                                GROUP BY access_type
+                            """, (link_id, user_name))
+                            
+                            failure_breakdown = dict(cursor.fetchall())
+                            password_fails = failure_breakdown.get('download', 0)
+                            decrypt_fails = failure_breakdown.get('decrypt_failure', 0)
+                            
+                            alert_msg = f"User '{user_name}' made {total_failed_count} failed attempts ({password_fails} password, {decrypt_fails} decryption) on your file"
                             
                             cursor.execute("""
                                 INSERT INTO security_alerts (user_id, alert_type, severity, message, link_id, created_at)
                                 VALUES (%s, %s, %s, %s, %s, %s)
-                            """, (owner_id, "suspicious_access", "medium", alert_msg, link_id, datetime.now()))
+                            """, (owner_id, "suspicious_access_attempts", "medium", alert_msg, link_id, datetime.now()))
                             
                             send_security_alert_email(owner_email, alert_msg, link_id)
             
