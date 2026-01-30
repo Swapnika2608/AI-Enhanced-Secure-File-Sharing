@@ -306,7 +306,8 @@ async def upload_file_simple(file: UploadFile = File(...)):
 async def download_page(file_id: str):
     """Serve download page with decryption capability"""
     try:
-        with open("static/download.html", "r", encoding="utf-8") as f:
+        download_path = os.path.join(STATIC_DIR, "download.html")
+        with open(download_path, "r", encoding="utf-8") as f:
             return HTMLResponse(f.read())
     except FileNotFoundError:
         return HTMLResponse(f"""
@@ -318,20 +319,83 @@ async def download_page(file_id: str):
             <strong>⚠️ This file is encrypted.</strong><br>
             You need both the decryption key and password (if set) to access it.
         </div>
-        <form method="get" action="/api/files/download/{file_id}" style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+        <form id="download-form">
             <div style="margin-bottom: 15px;">
                 <label style="display: block; margin-bottom: 5px; font-weight: bold;">Your Name:</label>
-                <input type="text" name="user_name" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                <input type="text" id="user-name" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
             </div>
             <div style="margin-bottom: 15px;">
                 <label style="display: block; margin-bottom: 5px; font-weight: bold;">File Password (if required):</label>
-                <input type="password" name="password" placeholder="Leave empty if no password" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                <input type="password" id="file-password" placeholder="Leave empty if no password" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
             </div>
-            <button type="submit" style="background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; width: 100%;">Download Encrypted File</button>
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: bold;">Decryption Key (Required):</label>
+                <input type="text" id="decryption-key" placeholder="Paste the 44-character decryption key" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                <small style="color: #666; font-size: 12px;">This should be provided separately from the download link</small>
+            </div>
+            <button type="submit" style="background: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; width: 100%;">🔓 Download & Decrypt File</button>
         </form>
-        <div style="background: #e7f3ff; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #007bff;">
-            <strong>📝 Note:</strong> This will download the encrypted file. You'll need the decryption key (provided separately) to decrypt it on your device.
-        </div>
+        <div id="alerts"></div>
+        <script>
+            document.getElementById('download-form').addEventListener('submit', async (e) => {{
+                e.preventDefault();
+                const userName = document.getElementById('user-name').value;
+                const filePassword = document.getElementById('file-password').value;
+                const decryptionKey = document.getElementById('decryption-key').value;
+                
+                if (!userName || !decryptionKey) {{
+                    alert('Please fill in your name and decryption key');
+                    return;
+                }}
+                
+                if (decryptionKey.length !== 44) {{
+                    alert('Invalid decryption key format. Key should be 44 characters long.');
+                    return;
+                }}
+                
+                try {{
+                    const downloadUrl = `/api/files/download/{file_id}?user_name=${{encodeURIComponent(userName)}}${{filePassword ? '&password=' + encodeURIComponent(filePassword) : ''}}`;
+                    const response = await fetch(downloadUrl);
+                    
+                    if (!response.ok) {{
+                        const errorData = await response.json().catch(() => ({{ detail: 'Download failed' }}));
+                        alert('❌ ' + (errorData.detail || 'Download failed'));
+                        return;
+                    }}
+                    
+                    const encryptedData = await response.arrayBuffer();
+                    const keyData = Uint8Array.from(atob(decryptionKey), c => c.charCodeAt(0));
+                    const cryptoKey = await crypto.subtle.importKey('raw', keyData, {{ name: 'AES-GCM' }}, false, ['decrypt']);
+                    const iv = new Uint8Array(encryptedData.slice(0, 12));
+                    const encrypted = new Uint8Array(encryptedData.slice(12));
+                    const decrypted = await crypto.subtle.decrypt({{ name: 'AES-GCM', iv: iv }}, cryptoKey, encrypted);
+                    
+                    let filename = 'decrypted_file';
+                    const contentDisposition = response.headers.get('content-disposition');
+                    if (contentDisposition) {{
+                        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+                        if (filenameMatch) {{
+                            filename = filenameMatch[1];
+                            if (filename.endsWith('.encrypted')) filename = filename.slice(0, -10);
+                        }}
+                    }}
+                    
+                    const blob = new Blob([decrypted]);
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    alert('🎉 File downloaded and decrypted successfully!');
+                }} catch (error) {{
+                    alert('❌ Download/Decryption failed: ' + error.message);
+                }}
+            }});
+        </script>
         </body></html>
         """)
 
