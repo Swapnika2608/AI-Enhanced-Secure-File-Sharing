@@ -1,3 +1,9 @@
+# Environment and config files
+.env
+.env.local
+.env.production
+config.py
+.env.example
 # Uploaded files (encrypted or not)
 uploads/
 *.encrypted
@@ -11,7 +17,6 @@ __pycache__/
 env/
 venv/
 .venv/
-.env
 
 # AI Models
 models/
@@ -43,3 +48,7 @@ Thumbs.db
 *.tmp
 *.temp
 temp/
+
+# Test files
+test_*.py
+*_test.py

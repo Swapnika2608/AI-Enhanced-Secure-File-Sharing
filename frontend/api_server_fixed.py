@@ -71,8 +71,12 @@ def send_security_alert_email(user_email: str, alert_message: str, link_id: str)
         # Application owner's Gmail SMTP configuration
         smtp_server = "smtp.gmail.com"
         smtp_port = 587
-        sender_email = "veerlapatiswapnika26@gmail.com"  # Application owner (sender)
-        sender_password = "qnuu jrvv qovg gxsl"  # App password
+        sender_email = os.environ.get('SMTP_EMAIL')
+        sender_password = os.environ.get('SMTP_PASSWORD')
+        
+        if not sender_email or not sender_password:
+            print("SMTP credentials not found in environment variables")
+            return False
         
         msg = MIMEMultipart()
         msg['From'] = sender_email
@@ -114,6 +118,8 @@ veerlapatiswapnika26@gmail.com
         return True
     except Exception as e:
         print(f"Failed to send security alert email: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def get_client_ip(request: Request) -> str:
@@ -719,8 +725,15 @@ async def report_decrypt_failure(link_id: str, request: Request):
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # Log the failure with specific type
-            access_type = f"{failure_type}_failure"
+            # Log the failure with specific type - use consistent naming
+            if failure_type == 'decryption':
+                access_type = 'decryption_failure'
+            elif failure_type == 'password':
+                access_type = 'password_failure'
+            elif failure_type == 'both':
+                access_type = 'both_failure'
+            else:
+                access_type = f"{failure_type}_failure"
             cursor.execute("""
                 INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -738,19 +751,22 @@ async def report_decrypt_failure(link_id: str, request: Request):
             print(f"Security tracking: User '{user_name}' has {total_failed_count} total failures for link {link_id}")
             
             if total_failed_count >= 3:
+                print(f"ALERT THRESHOLD REACHED: {total_failed_count} failures >= 3")
                 # Get file owner and send security alert
                 cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
                 owner_result = cursor.fetchone()
+                print(f"Owner query result: {owner_result}")
                 
                 if owner_result:
                     owner_id = owner_result[0]
                     cursor.execute("SELECT email FROM users WHERE id = %s", (owner_id,))
                     owner_email_result = cursor.fetchone()
+                    print(f"Owner email query result: {owner_email_result}")
                     
                     if owner_email_result:
                         owner_email = owner_email_result[0]
                         
-                        # Get breakdown of failure types
+                        # Get breakdown of failure types - fix the access_type names
                         cursor.execute("""
                             SELECT access_type, COUNT(*) FROM access_attempts 
                             WHERE link_id = %s AND user_name = %s AND success = false 
@@ -760,7 +776,7 @@ async def report_decrypt_failure(link_id: str, request: Request):
                         
                         failure_breakdown = dict(cursor.fetchall())
                         password_fails = failure_breakdown.get('download', 0) + failure_breakdown.get('password_failure', 0)
-                        decrypt_fails = failure_breakdown.get('decrypt_failure', 0) + failure_breakdown.get('decryption_failure', 0)
+                        decrypt_fails = failure_breakdown.get('decryption_failure', 0) + failure_breakdown.get('decrypt_failure', 0)
                         both_fails = failure_breakdown.get('both_failure', 0)
                         
                         alert_msg = f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed attempts on your file - {password_fails} password failures, {decrypt_fails} decryption failures, {both_fails} combined failures"
@@ -771,8 +787,11 @@ async def report_decrypt_failure(link_id: str, request: Request):
                         """, (owner_id, "suspicious_access_attempts", "high", alert_msg, link_id, datetime.now()))
                         
                         # Send email alert
-                        email_sent = send_security_alert_email(owner_email, alert_msg, link_id)
-                        print(f"Security alert created for user {owner_id}, email sent: {email_sent}")
+                        try:
+                            email_sent = send_security_alert_email(owner_email, alert_msg, link_id)
+                            print(f"Security alert created for user {owner_id}, email sent: {email_sent}")
+                        except Exception as email_error:
+                            print(f"Failed to send security alert email: {email_error}")
             
             conn.commit()
             return {"status": "logged", "total_failures": total_failed_count}
@@ -1110,7 +1129,7 @@ async def get_user_activity(
                     alerts.append({
                         "type": row[0],
                         "message": row[1],
-                        "timestamp": row[2].isoformat(),
+                        "timestamp": row[2].isoformat() if row[2] else None,
                         "severity": row[3]
                     })
             except Exception as e:
