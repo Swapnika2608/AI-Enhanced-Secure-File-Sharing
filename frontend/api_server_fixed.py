@@ -28,13 +28,27 @@ try:
         DB_CONFIG['database'] = DB_CONFIG.pop('dbname')
 except ImportError:
     # Use environment variables for production (Render)
-    DB_CONFIG = {
-        'host': os.environ.get('DB_HOST', 'localhost'),
-        'port': int(os.environ.get('DB_PORT', 5432)),
-        'database': os.environ.get('DB_NAME', 'blindsend_test'),
-        'user': os.environ.get('DB_USER', 'postgres'),
-        'password': os.environ.get('DB_PASSWORD', 'Swapnika2608')
-    }
+    # Try DATABASE_URL first (Render format), then individual vars
+    database_url = os.environ.get('DATABASE_URL')
+    if database_url:
+        # Parse DATABASE_URL format: postgresql://user:password@host:port/database
+        import urllib.parse
+        parsed = urllib.parse.urlparse(database_url)
+        DB_CONFIG = {
+            'host': parsed.hostname,
+            'port': parsed.port or 5432,
+            'database': parsed.path[1:],  # Remove leading /
+            'user': parsed.username,
+            'password': parsed.password
+        }
+    else:
+        DB_CONFIG = {
+            'host': os.environ.get('DB_HOST', 'localhost'),
+            'port': int(os.environ.get('DB_PORT', 5432)),
+            'database': os.environ.get('DB_NAME', 'blindsend_test'),
+            'user': os.environ.get('DB_USER', 'postgres'),
+            'password': os.environ.get('DB_PASSWORD', 'Swapnika2608')
+        }
 # AI imports
 try:
     from ai_security_engine import AISecurityEngine
@@ -182,10 +196,18 @@ def get_db():
         db_config = DB_CONFIG.copy()
         if 'dbname' in db_config:
             db_config['database'] = db_config.pop('dbname')
-        return psycopg.connect(**db_config)
+        
+        # Debug: Print connection details (without password)
+        debug_config = db_config.copy()
+        debug_config['password'] = '***'
+        print(f"Attempting DB connection with: {debug_config}")
+        
+        conn = psycopg.connect(**db_config)
+        print("Database connection successful!")
+        return conn
     except Exception as e:
         print(f"Database connection failed: {e}")
-        # Return a mock connection for development
+        print(f"DB_CONFIG: {DB_CONFIG}")
         return None
 
 def create_jwt_token(user_id: int, email: str) -> str:
