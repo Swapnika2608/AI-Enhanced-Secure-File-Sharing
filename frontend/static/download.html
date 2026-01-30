@@ -231,6 +231,8 @@
                 
                 // Get original filename from Content-Disposition header or use default
                 let filename = 'decrypted_file';
+                let mimeType = 'application/octet-stream';
+                
                 const contentDisposition = response.headers.get('content-disposition');
                 if (contentDisposition) {
                     const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
@@ -240,11 +242,28 @@
                         if (filename.endsWith('.encrypted')) {
                             filename = filename.slice(0, -10);
                         }
+                        
+                        // Determine MIME type from file extension
+                        const ext = filename.split('.').pop().toLowerCase();
+                        const mimeTypes = {
+                            'pdf': 'application/pdf',
+                            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+                            'png': 'image/png', 'gif': 'image/gif',
+                            'txt': 'text/plain', 'csv': 'text/csv',
+                            'doc': 'application/msword',
+                            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                            'xls': 'application/vnd.ms-excel',
+                            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            'zip': 'application/zip',
+                            'mp4': 'video/mp4', 'avi': 'video/avi',
+                            'mp3': 'audio/mpeg', 'wav': 'audio/wav'
+                        };
+                        mimeType = mimeTypes[ext] || 'application/octet-stream';
                     }
                 }
                 
-                // Create and download decrypted file
-                const blob = new Blob([decrypted]);
+                // Create and download decrypted file with correct MIME type
+                const blob = new Blob([decrypted], { type: mimeType });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
