@@ -875,8 +875,8 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
                             """, (link_id, user_name))
                             
                             failure_breakdown = dict(cursor.fetchall())
-                            password_fails = failure_breakdown.get('download', 0)
-                            decrypt_fails = failure_breakdown.get('decrypt_failure', 0)
+                            password_fails = failure_breakdown.get('password_failure', 0)
+                            decrypt_fails = failure_breakdown.get('decryption_failure', 0)
                             
                             alert_msg = f"User '{user_name}' made {total_failed_count} failed attempts ({password_fails} password, {decrypt_fails} decryption) on your file"
                             
@@ -1017,13 +1017,13 @@ async def get_user_activity(
                 total_uploads = 0
             
             try:
-                # Get downloads with pagination
+                # Get downloads with pagination - include ALL access attempts (success and failures)
                 cursor.execute("""
-                    SELECT aa.timestamp, aa.ip_address, aa.link_id, aa.success, aa.user_name
+                    SELECT aa.timestamp, aa.ip_address, aa.link_id, aa.success, aa.user_name, aa.access_type
                     FROM access_attempts aa
                     WHERE aa.link_id IN (
                         SELECT ul.link_id FROM user_links ul WHERE ul.user_id = %s
-                    ) AND aa.access_type = 'download'
+                    )
                     ORDER BY aa.timestamp DESC LIMIT %s OFFSET %s
                 """, (user_data["user_id"], limit, offset))
                 
@@ -1035,16 +1035,17 @@ async def get_user_activity(
                         "link_id": row[2],
                         "success": row[3],
                         "user_name": row[4] or "Anonymous",
-                        "location": location
+                        "location": location,
+                        "access_type": row[5]
                     })
                 
-                # Get total download count
+                # Get total download count - include ALL access attempts
                 cursor.execute("""
                     SELECT COUNT(*)
                     FROM access_attempts aa
                     WHERE aa.link_id IN (
                         SELECT ul.link_id FROM user_links ul WHERE ul.user_id = %s
-                    ) AND aa.access_type = 'download'
+                    )
                 """, (user_data["user_id"],))
                 total_downloads = cursor.fetchone()[0]
                 
@@ -1057,13 +1058,14 @@ async def get_user_activity(
             try:
                 file_offset = (file_page - 1) * file_limit
                 
-                # Total downloads per file with filename (paginated)
+                # Total downloads per file with filename (paginated) - include ALL access attempts
                 cursor.execute("""
-                    SELECT ul.link_id, COUNT(aa.id) as download_count,
-                           SUM(CASE WHEN aa.success = false THEN 1 ELSE 0 END) as failed_attempts,
+                    SELECT ul.link_id, 
+                           COUNT(CASE WHEN aa.access_type = 'download' AND aa.success = true THEN 1 END) as download_count,
+                           COUNT(CASE WHEN aa.success = false THEN 1 END) as failed_attempts,
                            ae.metadata, ae.timestamp
                     FROM user_links ul
-                    LEFT JOIN access_attempts aa ON ul.link_id = aa.link_id AND aa.access_type = 'download'
+                    LEFT JOIN access_attempts aa ON ul.link_id = aa.link_id
                     LEFT JOIN audit_events ae ON ul.link_id = ae.link_id AND ae.event_type = 'file_upload'
                     WHERE ul.user_id = %s
                     GROUP BY ul.link_id, ae.metadata, ae.timestamp
@@ -1256,6 +1258,48 @@ async def get_user_threat_analysis(user_id: int, admin_data: dict = Depends(veri
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Threat analysis error: {str(e)}")
+
+@app.get("/api/debug/failures/{link_id}")
+async def debug_failures(link_id: str):
+    """Debug endpoint to check what failure types are being stored"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Check all access attempts for this link
+            cursor.execute("""
+                SELECT access_type, success, user_name, timestamp 
+                FROM access_attempts 
+                WHERE link_id = %s 
+                ORDER BY timestamp DESC LIMIT 20
+            """, (link_id,))
+            
+            attempts = cursor.fetchall()
+            
+            # Get failure breakdown
+            cursor.execute("""
+                SELECT access_type, COUNT(*) 
+                FROM access_attempts 
+                WHERE link_id = %s AND success = false 
+                GROUP BY access_type
+            """, (link_id,))
+            
+            breakdown = dict(cursor.fetchall())
+            
+            return {
+                "link_id": link_id,
+                "recent_attempts": [{
+                    "access_type": attempt[0],
+                    "success": attempt[1],
+                    "user_name": attempt[2],
+                    "timestamp": attempt[3].isoformat() if attempt[3] else None
+                } for attempt in attempts],
+                "failure_breakdown": breakdown,
+                "total_failures": sum(breakdown.values())
+            }
+            
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/api/debug/security")
 async def debug_security():
