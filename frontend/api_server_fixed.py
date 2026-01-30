@@ -203,7 +203,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static files
+# Serve static files - handle both local and production paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 
@@ -211,12 +211,26 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 print(f"BASE_DIR: {BASE_DIR}")
 print(f"STATIC_DIR: {STATIC_DIR}")
 print(f"Static dir exists: {os.path.isdir(STATIC_DIR)}")
+print(f"Current working directory: {os.getcwd()}")
+print(f"Files in current dir: {os.listdir('.') if os.path.exists('.') else 'N/A'}")
 
-if os.path.isdir(STATIC_DIR):
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-    print(f"Mounted static files from: {STATIC_DIR}")
+# Try multiple static directory locations
+static_locations = [
+    STATIC_DIR,
+    "/opt/render/project/src/frontend/static",
+    "frontend/static",
+    "static",
+    "./static"
+]
+
+for static_path in static_locations:
+    if os.path.isdir(static_path):
+        app.mount("/static", StaticFiles(directory=static_path), name="static")
+        print(f"Mounted static files from: {static_path}")
+        STATIC_DIR = static_path  # Update STATIC_DIR to the working path
+        break
 else:
-    print(f"Static directory not found: {STATIC_DIR}")
+    print("No static directory found in any location")
 
 @app.get("/favicon.ico")
 async def favicon():
@@ -270,25 +284,29 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 async def home():
     """Serve main page"""
     try:
-        # Try the correct path since we know static dir exists
+        # Production paths for Render
+        production_paths = [
+            "/opt/render/project/src/frontend/static/index.html",
+            "frontend/static/index.html",
+            "static/index.html",
+            "./static/index.html"
+        ]
+        
+        # Try production paths first
+        for path in production_paths:
+            try:
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as f:
+                        return HTMLResponse(f.read())
+            except Exception as e:
+                print(f"Failed to read {path}: {e}")
+                continue
+        
+        # Try the computed static dir path
         index_path = os.path.join(STATIC_DIR, "index.html")
         if os.path.exists(index_path):
             with open(index_path, "r", encoding="utf-8") as f:
                 return HTMLResponse(f.read())
-        
-        # Fallback paths
-        static_paths = [
-            "static/index.html",
-            "frontend/static/index.html", 
-            "./static/index.html"
-        ]
-        
-        for path in static_paths:
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    return HTMLResponse(f.read())
-            except FileNotFoundError:
-                continue
                 
         # If no file found, return fallback
         raise FileNotFoundError("No index.html found")
@@ -343,9 +361,27 @@ async def upload_file_simple(file: UploadFile = File(...)):
 async def download_page(file_id: str):
     """Serve download page with decryption capability"""
     try:
-        download_path = os.path.join(STATIC_DIR, "download.html")
-        with open(download_path, "r", encoding="utf-8") as f:
-            return HTMLResponse(f.read())
+        # Try multiple paths for download.html
+        download_paths = [
+            os.path.join(STATIC_DIR, "download.html"),
+            "/opt/render/project/src/frontend/static/download.html",
+            "frontend/static/download.html",
+            "static/download.html",
+            "./static/download.html"
+        ]
+        
+        for download_path in download_paths:
+            try:
+                if os.path.exists(download_path):
+                    with open(download_path, "r", encoding="utf-8") as f:
+                        return HTMLResponse(f.read())
+            except Exception as e:
+                print(f"Failed to read {download_path}: {e}")
+                continue
+                
+        # Fallback HTML if no download.html found
+        raise FileNotFoundError("download.html not found")
+        
     except FileNotFoundError:
         return HTMLResponse(f"""
         <!DOCTYPE html>
