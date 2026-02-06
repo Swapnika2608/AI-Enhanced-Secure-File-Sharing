@@ -1,12 +1,9 @@
-# Environment and config files
+# Environment files with secrets
 .env
 .env.local
 .env.production
-config.py
-.env.example
-# Uploaded files (encrypted or not)
-uploads/
-*.encrypted
+.env.secure
+*.env
 
 # Python
 __pycache__/
@@ -16,39 +13,49 @@ __pycache__/
 .Python
 env/
 venv/
-.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Uploaded files
+uploads/
+*.encrypted
 
 # AI Models
 models/
 *.pkl
-*.joblib
 *.h5
 *.model
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# Logs
-*.log
-logs/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Temporary files
-*.tmp
-*.temp
-temp/
+# Logs
+*.log
+logs/
 
-# Test files
-test_*.py
-*_test.py
+# Database
+*.db
+*.sqlite
+*.sqlite3

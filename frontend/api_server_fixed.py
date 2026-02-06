@@ -22,6 +22,20 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+# Import rate limiter
+try:
+    from rate_limiter import rate_limit_dependency
+    RATE_LIMITING_ENABLED = True
+except ImportError:
+    print("⚠️ Rate limiter not available - running without rate limiting")
+    RATE_LIMITING_ENABLED = False
+    async def rate_limit_dependency(request: Request):
+        return True
+
+# File upload limits
+MAX_FILE_SIZE_MB = int(os.environ.get('MAX_FILE_SIZE_MB', 100))
+MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+
 def utc_now():
     """Get current UTC time - use this for all database storage"""
     return datetime.now(timezone.utc)
@@ -59,12 +73,17 @@ except ImportError:
             'password': parsed.password
         }
     else:
+        # CRITICAL: No fallback credentials - fail fast if not configured
+        db_password = os.environ.get('DB_PASSWORD')
+        if not db_password:
+            raise ValueError("DB_PASSWORD environment variable is required. Set it in .env file.")
+        
         DB_CONFIG = {
             'host': os.environ.get('DB_HOST', 'localhost'),
             'port': int(os.environ.get('DB_PORT', 5432)),
             'dbname': os.environ.get('DB_NAME', 'blindsend_test'),
             'user': os.environ.get('DB_USER', 'postgres'),
-            'password': os.environ.get('DB_PASSWORD', 'Swapnika2608')
+            'password': db_password
         }
 # AI imports
 try:
@@ -154,13 +173,14 @@ if AI_IMPORTS_AVAILABLE:
 else:
     print("AI Security Engine disabled - imports not available")
 
-# CORS middleware
+# CORS middleware - SECURE: Restrict to specific origins
+ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5000').split(',')
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Keep open for now, restrict later
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 # Serve static files - handle both local and production paths
@@ -201,8 +221,10 @@ async def favicon():
         # Return a simple response if favicon not found
         return HTMLResponse("")
 
-# JWT settings
-JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production')
+# JWT settings - CRITICAL: No fallback secret
+JWT_SECRET = os.environ.get('JWT_SECRET')
+if not JWT_SECRET or JWT_SECRET == 'your-secret-key-change-in-production':
+    raise ValueError("JWT_SECRET environment variable must be set to a secure random string. Generate with: python -c 'import secrets; print(secrets.token_urlsafe(64))'")
 JWT_ALGORITHM = "HS256"
 
 def get_db():
@@ -595,13 +617,15 @@ async def init_database():
         return {"error": f"Database initialization failed: {str(e)}", "status": "failed"}
 
 @app.post("/api/auth/register")
-async def register(email: str = Form(...), password: str = Form(...)):
-    """Register new user"""
+async def register(request: Request, email: str = Form(...), password: str = Form(...), _rate_limit: bool = Depends(rate_limit_dependency)):
+    """Register new user with rate limiting"""
     try:
         print(f"Registration attempt for: {email}")
-        with get_db() as conn:
-            if not conn:
-                raise HTTPException(status_code=500, detail="Database connection failed")
+        conn = get_db()
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        try:
             cursor = conn.cursor()
             
             # Check if user exists
@@ -628,6 +652,8 @@ async def register(email: str = Form(...), password: str = Form(...)):
             print(f"JWT token created")
             
             return {"token": token, "user_id": user_id, "email": email}
+        finally:
+            conn.close()
             
     except HTTPException:
         raise
@@ -636,13 +662,15 @@ async def register(email: str = Form(...), password: str = Form(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/auth/login")
-async def login(email: str = Form(...), password: str = Form(...)):
-    """User login with security monitoring"""
+async def login(request: Request, email: str = Form(...), password: str = Form(...), _rate_limit: bool = Depends(rate_limit_dependency)):
+    """User login with security monitoring and rate limiting"""
     try:
         print(f"Login attempt for: {email}")
-        with get_db() as conn:
-            if not conn:
-                raise HTTPException(status_code=500, detail="Database connection failed")
+        conn = get_db()
+        if not conn:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        try:
             cursor = conn.cursor()
             
             # Get user
@@ -681,6 +709,8 @@ async def login(email: str = Form(...), password: str = Form(...)):
             print(f"Login successful for {email}")
             
             return {"token": token, "user_id": user_id, "email": email}
+        finally:
+            conn.close()
             
     except HTTPException:
         raise
@@ -690,20 +720,33 @@ async def login(email: str = Form(...), password: str = Form(...)):
 
 @app.post("/api/files/upload")
 async def upload_file(
+    request: Request,
     file: UploadFile = File(...),
     max_downloads: int = Form(default=10),
     expires_hours: int = Form(default=168),
     password: Optional[str] = Form(default=None),
-    user_data: dict = Depends(verify_token)
+    user_data: dict = Depends(verify_token),
+    _rate_limit: bool = Depends(rate_limit_dependency)
 ):
-    """Upload file with security controls"""
+    """Upload file with security controls and file size limits"""
     try:
+        # Check file size before reading
+        content = await file.read()
+        file_size = len(content)
+        
+        if file_size > MAX_FILE_SIZE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size is {MAX_FILE_SIZE_MB}MB"
+            )
+        
+        if file_size == 0:
+            raise HTTPException(status_code=400, detail="Empty file not allowed")
         os.makedirs("uploads", exist_ok=True)
         link_id = str(uuid.uuid4())
         file_path = f"uploads/{link_id}_{file.filename}"
         
         with open(file_path, "wb") as f:
-            content = await file.read()
             f.write(content)
         
         with get_db() as conn:
@@ -843,8 +886,8 @@ async def report_decrypt_failure(link_id: str, request: Request):
         return {"status": "error", "error": str(e)}
 
 @app.get("/api/files/download/{link_id}")
-async def download_file(link_id: str, request: Request, password: Optional[str] = None, user_name: Optional[str] = None):
-    """Download file with access monitoring"""
+async def download_file(link_id: str, request: Request, password: Optional[str] = None, user_name: Optional[str] = None, _rate_limit: bool = Depends(rate_limit_dependency)):
+    """Download file with access monitoring and rate limiting"""
     if not user_name:
         raise HTTPException(status_code=400, detail="User name is required")
     
@@ -1354,3 +1397,21 @@ async def debug_security():
         return {"error": str(e)}
 
 
+if __name__ == "__main__":
+    import uvicorn
+    PORT = int(os.environ.get('PORT', 5000))
+    print("="*70)
+    print("🔐 BLINDSEND - AI-ENHANCED SECURE FILE SHARING")
+    print("="*70)
+    print(f"✅ Server starting on http://localhost:{PORT}")
+    print(f"✅ Rate limiting: {RATE_LIMITING_ENABLED}")
+    print(f"✅ Max file size: {MAX_FILE_SIZE_MB}MB")
+    print(f"✅ CORS origins: {ALLOWED_ORIGINS}")
+    print(f"✅ AI Security: {'Enabled' if ai_engine else 'Disabled'}")
+    print("="*70)
+    print(f"\n🌐 Access your application at: http://localhost:{PORT}")
+    print(f"📊 Health check: http://localhost:{PORT}/health")
+    print(f"🔧 Initialize DB: http://localhost:{PORT}/init-db")
+    print("\n" + "="*70)
+    
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
