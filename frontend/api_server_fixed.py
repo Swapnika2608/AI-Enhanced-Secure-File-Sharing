@@ -920,6 +920,32 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
                     INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (link_id, client_ip, utc_now(), "password_failure", False, 0.8, user_name))
+
+                # Count total failures including this one
+                cursor.execute("""
+                    SELECT COUNT(*) FROM access_attempts
+                    WHERE link_id = %s AND user_name = %s AND success = false
+                    AND timestamp > NOW() - INTERVAL '1 hour'
+                """, (link_id, user_name))
+                total_failed_count = cursor.fetchone()[0] + 1
+
+                if total_failed_count >= 3:
+                    cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
+                    owner_result = cursor.fetchone()
+                    if owner_result:
+                        owner_id = owner_result[0]
+                        cursor.execute("SELECT email FROM users WHERE id = %s", (owner_id,))
+                        owner_email_result = cursor.fetchone()
+                        if owner_email_result:
+                            owner_email = owner_email_result[0]
+                            alert_msg = f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed password attempts on your file"
+                            cursor.execute("""
+                                INSERT INTO security_alerts (user_id, alert_type, severity, message, link_id, created_at)
+                                VALUES (%s, %s, %s, %s, %s, %s)
+                            """, (owner_id, "suspicious_access_attempts", "high", alert_msg, link_id, utc_now()))
+                            send_security_alert_email(owner_email, alert_msg, link_id)
+                            print(f"🚨 Alert sent to {owner_email} after {total_failed_count} password failures")
+
                 conn.commit()
                 raise HTTPException(status_code=401, detail="Invalid password")
             
@@ -931,49 +957,6 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
             
             if download_count >= max_downloads:
                 raise HTTPException(status_code=403, detail="Download limit exceeded")
-            
-            # Check for multiple failed attempts (combined password + decryption failures)
-            if password_hash and password and not bcrypt.checkpw(password.encode(), password_hash.encode()):
-                cursor.execute("""
-                    SELECT COUNT(*) FROM access_attempts 
-                    WHERE link_id = %s AND user_name = %s AND success = false 
-                    AND timestamp > NOW() - INTERVAL '1 hour'
-                """, (link_id, user_name))
-                
-                total_failed_count = cursor.fetchone()[0]
-                if total_failed_count >= 3:
-                    # Get file owner
-                    cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
-                    owner_result = cursor.fetchone()
-                    
-                    if owner_result:
-                        owner_id = owner_result[0]
-                        cursor.execute("SELECT email FROM users WHERE id = %s", (owner_id,))
-                        owner_email_result = cursor.fetchone()
-                        
-                        if owner_email_result:
-                            owner_email = owner_email_result[0]
-                            
-                            # Get breakdown of failure types
-                            cursor.execute("""
-                                SELECT access_type, COUNT(*) FROM access_attempts 
-                                WHERE link_id = %s AND user_name = %s AND success = false 
-                                AND timestamp > NOW() - INTERVAL '1 hour'
-                                GROUP BY access_type
-                            """, (link_id, user_name))
-                            
-                            failure_breakdown = dict(cursor.fetchall())
-                            password_fails = failure_breakdown.get('password_failure', 0)
-                            decrypt_fails = failure_breakdown.get('decryption_failure', 0)
-                            
-                            alert_msg = f"User '{user_name}' made {total_failed_count} failed attempts ({password_fails} password, {decrypt_fails} decryption) on your file"
-                            
-                            cursor.execute("""
-                                INSERT INTO security_alerts (user_id, alert_type, severity, message, link_id, created_at)
-                                VALUES (%s, %s, %s, %s, %s, %s)
-                            """, (owner_id, "suspicious_access_attempts", "medium", alert_msg, link_id, datetime.now()))
-                            
-                            send_security_alert_email(owner_email, alert_msg, link_id)
             
             cursor.execute("""
                 INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
