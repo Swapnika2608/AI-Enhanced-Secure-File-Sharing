@@ -96,34 +96,40 @@ except ImportError as e:
     print(f"AI imports failed: {e}")
     AI_IMPORTS_AVAILABLE = False
 
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import requests
 from datetime import timezone, timedelta
+import resend
+
+resend.api_key = os.environ.get("RESEND_API_KEY", "")
+FROM_EMAIL = os.environ.get("FROM_EMAIL", "onboarding@resend.dev")
 
 def send_security_alert_email(user_email: str, alert_message: str, link_id: str):
-    """Send security alert email using HTTP API instead of SMTP"""
+    """Send security alert email using Resend API"""
     try:
-        # For Render deployment, use a simple HTTP-based email service
-        # This is a fallback that logs the alert instead of sending email
-        print(f"🚨 SECURITY ALERT EMAIL (would send to {user_email}):")
-        print(f"Subject: BlindSend Security Alert - Suspicious Activity")
-        print(f"Message: {alert_message}")
-        print(f"Link ID: {link_id}")
-        print(f"Timestamp: {datetime.now()}")
-        
-        # In production, you would replace this with:
-        # - SendGrid API call
-        # - Mailgun API call  
-        # - Amazon SES API call
-        # - Or any other HTTP-based email service
-        
-        # For now, we'll simulate success since the alert is logged
+        if not resend.api_key:
+            print("⚠️ RESEND_API_KEY not set - skipping email")
+            return False
+
+        params: resend.Emails.SendParams = {
+            "from": f"BlindSend Security <{FROM_EMAIL}>",
+            "to": [user_email],
+            "subject": "🚨 BlindSend Security Alert - Suspicious Activity Detected",
+            "html": f"""
+                <h2>🚨 Security Alert</h2>
+                <p>{alert_message}</p>
+                <p><strong>Link ID:</strong> {link_id}</p>
+                <p><strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
+                <hr>
+                <p style="color: gray; font-size: 12px;">This is an automated alert from BlindSend.</p>
+            """
+        }
+
+        response = resend.Emails.send(params)
+        print(f"✅ Security alert email sent to {user_email}, id: {response.id}")
         return True
-        
+
     except Exception as e:
-        print(f"Failed to send security alert: {e}")
+        print(f"❌ Failed to send security alert email: {e}")
         return False
 
 def get_client_ip(request: Request) -> str:
@@ -801,6 +807,15 @@ async def report_decrypt_failure(link_id: str, request: Request):
         with get_db() as conn:
             cursor = conn.cursor()
             
+            # Check for multiple failed attempts BEFORE logging this one
+            cursor.execute("""
+                SELECT COUNT(*) FROM access_attempts 
+                WHERE link_id = %s AND user_name = %s AND success = false 
+                AND timestamp > NOW() - INTERVAL '1 hour'
+            """, (link_id, user_name))
+            
+            previous_failed_count = cursor.fetchone()[0]
+            
             # Log the failure with specific type - use consistent naming
             if failure_type == 'decryption':
                 access_type = 'decryption_failure'
@@ -815,14 +830,8 @@ async def report_decrypt_failure(link_id: str, request: Request):
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (link_id, client_ip, utc_now(), access_type, False, 0.9, user_name))
             
-            # Check for multiple failed attempts (combined all failure types)
-            cursor.execute("""
-                SELECT COUNT(*) FROM access_attempts 
-                WHERE link_id = %s AND user_name = %s AND success = false 
-                AND timestamp > NOW() - INTERVAL '1 hour'
-            """, (link_id, user_name))
-            
-            total_failed_count = cursor.fetchone()[0]
+            # Total count including current failure
+            total_failed_count = previous_failed_count + 1
             
             print(f"🔍 DEBUG: User '{user_name}' has {total_failed_count} total failures for link {link_id}")
             print(f"🔍 DEBUG: Threshold check: {total_failed_count} >= 3 = {total_failed_count >= 3}")
@@ -844,7 +853,16 @@ async def report_decrypt_failure(link_id: str, request: Request):
                     if owner_email_result:
                         owner_email = owner_email_result[0]
                         
-                        # Get breakdown of failure types - fix the access_type names
+                        # Get breakdown of failure types (excluding current one)
+                        # Count all previous failures by type
+                        password_fails = 0
+                        decrypt_fails = 0
+                        
+                        for i in range(previous_failed_count):
+                            # This is a simple approach - count from previous_failed_count
+                            pass
+                        
+                        # Query for actual breakdown from database
                         cursor.execute("""
                             SELECT access_type, COUNT(*) FROM access_attempts 
                             WHERE link_id = %s AND user_name = %s AND success = false 
@@ -852,13 +870,24 @@ async def report_decrypt_failure(link_id: str, request: Request):
                             GROUP BY access_type
                         """, (link_id, user_name))
                         
+                        # This will include the current insert, so subtract 1 from current type
                         failure_breakdown = dict(cursor.fetchall())
                         password_fails = failure_breakdown.get('password_failure', 0)
                         decrypt_fails = failure_breakdown.get('decryption_failure', 0)
-                        both_fails = failure_breakdown.get('both_failure', 0)
-                        combined_fails = total_failed_count  # Use total count as combined failures
                         
-                        alert_msg = f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed attempts on your file - {password_fails} password failures, {decrypt_fails} decryption failures, {combined_fails} combined failures"
+                        # Subtract the current failure that was just inserted
+                        if access_type == 'password_failure':
+                            password_fails -= 1
+                        elif access_type == 'decryption_failure':
+                            decrypt_fails -= 1
+                        
+                        # Now add it back to show in alert
+                        if access_type == 'password_failure':
+                            password_fails += 1
+                        elif access_type == 'decryption_failure':
+                            decrypt_fails += 1
+                        
+                        alert_msg = f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed attempts on your file - {password_fails} password failures, {decrypt_fails} decryption failures"
                         
                         cursor.execute("""
                             INSERT INTO security_alerts (user_id, alert_type, severity, message, link_id, created_at)
@@ -980,7 +1009,21 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
             
             for filename in os.listdir("uploads"):
                 if filename.startswith(f"{link_id}_"):
-                    return FileResponse(f"uploads/{filename}", filename=filename.split("_", 1)[1])
+                    # Extract original filename (remove link_id prefix)
+                    original_filename = filename.split("_", 1)[1]
+                    # Remove .encrypted extension if present
+                    if original_filename.endswith('.encrypted'):
+                        original_filename = original_filename[:-10]
+                    
+                    from urllib.parse import quote
+                    return FileResponse(
+                        f"uploads/{filename}",
+                        filename=original_filename,
+                        media_type='application/octet-stream',
+                        headers={
+                            'Content-Disposition': f'attachment; filename="{quote(original_filename)}"'
+                        }
+                    )
             
             raise HTTPException(status_code=404, detail="File not found on disk")
             

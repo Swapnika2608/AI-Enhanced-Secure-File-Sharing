@@ -127,22 +127,24 @@
                 document.getElementById('download-form').classList.add('hidden');
                 document.getElementById('decryption-steps').classList.remove('hidden');
                 
-                // Step 1: Fast key verification
-                document.getElementById('download-status').textContent = 'Verifying decryption key...';
+                // Step 1: Download file (server checks password first)
+                document.getElementById('download-status').textContent = 'Checking password and downloading file...';
                 
                 const downloadUrl = `/api/files/download/${fileId}?user_name=${encodeURIComponent(userName)}${filePassword ? '&password=' + encodeURIComponent(filePassword) : ''}`;
                 
-                // Download only first 44 bytes for key verification (12 IV + 32 encrypted verifier)
-                const headerResponse = await fetch(downloadUrl, {
-                    headers: { 'Range': 'bytes=0-43' }
-                });
+                const response = await fetch(downloadUrl);
                 
-                if (!headerResponse.ok) {
-                    const errorData = await headerResponse.json().catch(() => ({ detail: 'Download failed' }));
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ detail: 'Download failed' }));
+                    // Server rejected - password was wrong (server already logged it)
                     throw new Error(errorData.detail || 'Download failed');
                 }
                 
-                // Import the decryption key
+                document.getElementById('download-status').innerHTML = '✅ Password verified, file downloaded';
+                
+                // Step 2: Import decryption key
+                document.getElementById('decrypt-status').textContent = 'Importing decryption key...';
+                
                 let keyData, cryptoKey;
                 try {
                     keyData = Uint8Array.from(atob(decryptionKey), c => c.charCodeAt(0));
@@ -154,51 +156,18 @@
                         ['decrypt']
                     );
                 } catch (e) {
-                    throw new Error('Invalid decryption key format');
-                }
-                
-                // Verify key with header
-                const headerData = await headerResponse.arrayBuffer();
-                const verifierIv = new Uint8Array(headerData.slice(0, 12));
-                const encryptedVerifier = new Uint8Array(headerData.slice(12, 44)); // 32 bytes for encrypted verifier
-                
-                try {
-                    const decryptedVerifier = await crypto.subtle.decrypt(
-                        { name: 'AES-GCM', iv: verifierIv },
-                        cryptoKey,
-                        encryptedVerifier
-                    );
-                    const verifierText = new TextDecoder().decode(decryptedVerifier);
-                    
-                    if (verifierText !== "BLINDSEND_KEY_OK") {
-                        throw new Error('Key verification failed');
-                    }
-                } catch (verifyError) {
-                    // Report decryption failure immediately
+                    // Report decryption failure
                     fetch(`/api/files/report-decrypt-failure/${fileId}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ user_name: userName, failure_type: 'decryption' })
                     }).catch(() => {});
-                    
-                    throw new Error('Invalid decryption key - verification failed');
+                    throw new Error('Invalid decryption key format');
                 }
-                
-                document.getElementById('download-status').innerHTML = '✅ Key verified successfully';
-                
-                // Step 2: Download full encrypted file
-                document.getElementById('decrypt-status').textContent = 'Downloading encrypted file...';
-                
-                const response = await fetch(downloadUrl);
-                
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ detail: 'Download failed' }));
-                    throw new Error(errorData.detail || 'Download failed');
-                }
-                
-                document.getElementById('decrypt-status').innerHTML = '✅ File downloaded - decrypting...';
                 
                 // Step 3: Decrypt file
+                document.getElementById('decrypt-status').textContent = 'Decrypting file...';
+                
                 const encryptedData = await response.arrayBuffer();
                 
                 // Parse the new format: [verifier IV][encrypted verifier][file IV][encrypted file]
@@ -221,7 +190,13 @@
                         encryptedFile
                     );
                 } catch (decryptError) {
-                    throw new Error('File decryption failed - corrupted file');
+                    // Report decryption failure
+                    fetch(`/api/files/report-decrypt-failure/${fileId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_name: userName, failure_type: 'decryption' })
+                    }).catch(() => {});
+                    throw new Error('Decryption failed - invalid key');
                 }
                 
                 document.getElementById('decrypt-status').innerHTML = '✅ File decrypted successfully';
@@ -235,9 +210,10 @@
                 
                 const contentDisposition = response.headers.get('content-disposition');
                 if (contentDisposition) {
-                    const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
-                    if (filenameMatch) {
-                        filename = filenameMatch[1];
+                    // Match filename with or without quotes, handle special characters
+                    const filenameMatch = contentDisposition.match(/filename[*]?=["']?(?:UTF-\d["'])?([^"';\n]+)["']?/i);
+                    if (filenameMatch && filenameMatch[1]) {
+                        filename = decodeURIComponent(filenameMatch[1].trim());
                         // Remove .encrypted extension if present
                         if (filename.endsWith('.encrypted')) {
                             filename = filename.slice(0, -10);
@@ -284,30 +260,11 @@
                 document.getElementById('download-form').classList.remove('hidden');
                 document.getElementById('decryption-steps').classList.add('hidden');
                 
+                // Only show alert, don't report again (server already logged it)
                 if (error.message.includes('Invalid password')) {
                     showAlert('❌ Incorrect password. Please check the password and try again.', 'error');
-                    // Report password failure to server for security tracking
-                    fetch(`/api/files/report-decrypt-failure/${fileId}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_name: userName, failure_type: 'password' })
-                    }).catch(() => {});
-                } else if (error.message.includes('Decryption failed') || error.message.includes('invalid key')) {
+                } else if (error.message.includes('Decryption failed') || error.message.includes('invalid key') || error.message.includes('verification failed')) {
                     showAlert('❌ Invalid decryption key. Please check the key and try again.', 'error');
-                    // Report decryption failure to server for security tracking
-                    fetch(`/api/files/report-decrypt-failure/${fileId}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_name: userName, failure_type: 'decryption' })
-                    }).catch(() => {});
-                } else if (error.message.includes('Both password and decryption key')) {
-                    showAlert('❌ Both password and decryption key are incorrect. Please verify both and try again.', 'error');
-                    // Report both failures
-                    fetch(`/api/files/report-decrypt-failure/${fileId}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_name: userName, failure_type: 'both' })
-                    }).catch(() => {});
                 } else {
                     showAlert('❌ Download failed: ' + error.message, 'error');
                 }
