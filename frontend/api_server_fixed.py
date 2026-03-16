@@ -921,6 +921,7 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
                     AND timestamp > NOW() - INTERVAL '1 hour'
                 """, (link_id, user_name))
                 total_failed_count = cursor.fetchone()[0] + 1
+                print(f"🔍 PASSWORD FAIL: User '{user_name}' total_failed_count={total_failed_count}, mod={total_failed_count % 3}")
 
                 if total_failed_count >= 3 and total_failed_count % 3 == 0:
                     cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
