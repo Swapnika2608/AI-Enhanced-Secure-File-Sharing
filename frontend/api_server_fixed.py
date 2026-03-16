@@ -858,11 +858,7 @@ async def report_decrypt_failure(link_id: str, request: Request):
                         if access_type == 'decryption_failure':
                             decrypt_fails += 1
 
-                        alert_msg = (
-                            f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed attempts on your file\n"
-                            f"- Password failures: {password_fails}\n"
-                            f"- Decryption key failures: {decrypt_fails}"
-                        )
+                            alert_msg = f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed attempts on your file in the last 1 hour"
                         cursor.execute("""
                             INSERT INTO security_alerts (user_id, alert_type, severity, message, link_id, created_at)
                             VALUES (%s, %s, %s, %s, %s, %s)
@@ -932,21 +928,7 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
                         owner_email_result = cursor.fetchone()
                         if owner_email_result:
                             owner_email = owner_email_result[0]
-                            # Get actual breakdown of all failure types
-                            cursor.execute("""
-                                SELECT access_type, COUNT(*) FROM access_attempts
-                                WHERE link_id = %s AND user_name = %s AND success = false
-                                AND timestamp > NOW() - INTERVAL '1 hour'
-                                GROUP BY access_type
-                            """, (link_id, user_name))
-                            failure_breakdown = dict(cursor.fetchall())
-                            password_fails = failure_breakdown.get('password_failure', 0) + 1
-                            decrypt_fails = failure_breakdown.get('decryption_failure', 0)
-                            alert_msg = (
-                                f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed attempts on your file\n"
-                                f"- Password failures: {password_fails}\n"
-                                f"- Decryption key failures: {decrypt_fails}"
-                            )
+                            alert_msg = f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed attempts on your file in the last 1 hour"
                             cursor.execute("""
                                 INSERT INTO security_alerts (user_id, alert_type, severity, message, link_id, created_at)
                                 VALUES (%s, %s, %s, %s, %s, %s)
