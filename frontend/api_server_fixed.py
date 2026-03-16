@@ -905,12 +905,7 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
             max_downloads, expires_at, is_revoked, password_hash, download_count = result
             
             if password_hash and (not password or not bcrypt.checkpw(password.encode(), password_hash.encode())):
-                cursor.execute("""
-                    INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """, (link_id, client_ip, utc_now(), "password_failure", False, 0.8, user_name))
-
-                # Count total failures including this one
+                # Count BEFORE inserting
                 cursor.execute("""
                     SELECT COUNT(*) FROM access_attempts
                     WHERE link_id = %s AND user_name = %s AND success = false
@@ -918,6 +913,11 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
                 """, (link_id, user_name))
                 total_failed_count = cursor.fetchone()[0] + 1
                 print(f"🔍 PASSWORD FAIL: User '{user_name}' total_failed_count={total_failed_count}, mod={total_failed_count % 3}")
+
+                cursor.execute("""
+                    INSERT INTO access_attempts (link_id, ip_address, timestamp, access_type, success, risk_score, user_name)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (link_id, client_ip, utc_now(), "password_failure", False, 0.8, user_name))
 
                 if total_failed_count >= 3 and total_failed_count % 3 == 0:
                     cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
