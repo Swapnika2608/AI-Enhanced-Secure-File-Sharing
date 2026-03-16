@@ -116,7 +116,7 @@ def send_security_alert_email(user_email: str, alert_message: str, link_id: str)
             "subject": "🚨 BlindSend Security Alert - Suspicious Activity Detected",
             "html": f"""
                 <h2>🚨 Security Alert</h2>
-                <p>{alert_message}</p>
+                <p>{alert_message.replace(chr(10), '<br>')}</p>
                 <p><strong>Link ID:</strong> {link_id}</p>
                 <p><strong>Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
                 <hr>
@@ -835,20 +835,14 @@ async def report_decrypt_failure(link_id: str, request: Request):
             print(f"🔍 DEBUG: User '{user_name}' has {total_failed_count} total failures for link {link_id}")
             print(f"🔍 DEBUG: Threshold check: {total_failed_count} >= 3 = {total_failed_count >= 3}")
             
-            if total_failed_count >= 3:
-                print(f"🚨 ALERT THRESHOLD REACHED: {total_failed_count} failures >= 3")
-                print(f"🔍 DEBUG: EMAIL TRIGGERED - Processing alert...")
-                # Get file owner and send security alert
+            if total_failed_count >= 3 and total_failed_count % 3 == 0:
+                print(f"🚨 ALERT THRESHOLD REACHED: {total_failed_count} failures")
                 cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
                 owner_result = cursor.fetchone()
-                print(f"Owner query result: {owner_result}")
-                
                 if owner_result:
                     owner_id = owner_result[0]
                     cursor.execute("SELECT email FROM users WHERE id = %s", (owner_id,))
                     owner_email_result = cursor.fetchone()
-                    print(f"Owner email query result: {owner_email_result}")
-                    
                     if owner_email_result:
                         owner_email = owner_email_result[0]
 
@@ -858,29 +852,28 @@ async def report_decrypt_failure(link_id: str, request: Request):
                             AND timestamp > NOW() - INTERVAL '1 hour'
                             GROUP BY access_type
                         """, (link_id, user_name))
-
                         failure_breakdown = dict(cursor.fetchall())
                         password_fails = failure_breakdown.get('password_failure', 0)
                         decrypt_fails = failure_breakdown.get('decryption_failure', 0)
-                        # Add current failure
-                        if access_type == 'password_failure':
-                            password_fails += 1
-                        elif access_type == 'decryption_failure':
+                        if access_type == 'decryption_failure':
                             decrypt_fails += 1
 
-                        alert_msg = f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed attempts on your file - {password_fails} password failures, {decrypt_fails} decryption failures"
-                        
+                        alert_msg = (
+                            f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed attempts on your file\n"
+                            f"- Password failures: {password_fails}\n"
+                            f"- Decryption key failures: {decrypt_fails}"
+                        )
                         cursor.execute("""
                             INSERT INTO security_alerts (user_id, alert_type, severity, message, link_id, created_at)
                             VALUES (%s, %s, %s, %s, %s, %s)
                         """, (owner_id, "suspicious_access_attempts", "high", alert_msg, link_id, utc_now()))
-                        
                         try:
-                            print(f"📧 Attempting to send email to {owner_email}")
                             email_sent = send_security_alert_email(owner_email, alert_msg, link_id)
                             print(f"Security alert created for user {owner_id}, email sent: {email_sent}")
                         except Exception as email_error:
                             print(f"❌ Email send failed: {email_error}")
+                    else:
+                        print(f"⏳ Alert already sent for link {link_id} in last hour, skipping")
             
             conn.commit()
             return {"status": "logged", "total_failures": total_failed_count}
@@ -929,7 +922,7 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
                 """, (link_id, user_name))
                 total_failed_count = cursor.fetchone()[0] + 1
 
-                if total_failed_count >= 3:
+                if total_failed_count >= 3 and total_failed_count % 3 == 0:
                     cursor.execute("SELECT ul.user_id FROM user_links ul WHERE ul.link_id = %s", (link_id,))
                     owner_result = cursor.fetchone()
                     if owner_result:
