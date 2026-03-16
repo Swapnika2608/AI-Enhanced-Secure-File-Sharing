@@ -807,13 +807,12 @@ async def report_decrypt_failure(link_id: str, request: Request):
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # Check for multiple failed attempts BEFORE logging this one
+            # Check ALL failures across both endpoints BEFORE logging this one
             cursor.execute("""
                 SELECT COUNT(*) FROM access_attempts 
                 WHERE link_id = %s AND user_name = %s AND success = false 
                 AND timestamp > NOW() - INTERVAL '1 hour'
             """, (link_id, user_name))
-            
             previous_failed_count = cursor.fetchone()[0]
             
             # Log the failure with specific type - use consistent naming
@@ -852,41 +851,23 @@ async def report_decrypt_failure(link_id: str, request: Request):
                     
                     if owner_email_result:
                         owner_email = owner_email_result[0]
-                        
-                        # Get breakdown of failure types (excluding current one)
-                        # Count all previous failures by type
-                        password_fails = 0
-                        decrypt_fails = 0
-                        
-                        for i in range(previous_failed_count):
-                            # This is a simple approach - count from previous_failed_count
-                            pass
-                        
-                        # Query for actual breakdown from database
+
                         cursor.execute("""
                             SELECT access_type, COUNT(*) FROM access_attempts 
                             WHERE link_id = %s AND user_name = %s AND success = false 
                             AND timestamp > NOW() - INTERVAL '1 hour'
                             GROUP BY access_type
                         """, (link_id, user_name))
-                        
-                        # This will include the current insert, so subtract 1 from current type
+
                         failure_breakdown = dict(cursor.fetchall())
                         password_fails = failure_breakdown.get('password_failure', 0)
                         decrypt_fails = failure_breakdown.get('decryption_failure', 0)
-                        
-                        # Subtract the current failure that was just inserted
-                        if access_type == 'password_failure':
-                            password_fails -= 1
-                        elif access_type == 'decryption_failure':
-                            decrypt_fails -= 1
-                        
-                        # Now add it back to show in alert
+                        # Add current failure
                         if access_type == 'password_failure':
                             password_fails += 1
                         elif access_type == 'decryption_failure':
                             decrypt_fails += 1
-                        
+
                         alert_msg = f"🚨 SECURITY ALERT: User '{user_name}' made {total_failed_count} failed attempts on your file - {password_fails} password failures, {decrypt_fails} decryption failures"
                         
                         cursor.execute("""
@@ -894,18 +875,12 @@ async def report_decrypt_failure(link_id: str, request: Request):
                             VALUES (%s, %s, %s, %s, %s, %s)
                         """, (owner_id, "suspicious_access_attempts", "high", alert_msg, link_id, utc_now()))
                         
-                        # Send email alert
                         try:
-                            print(f"📧 DEBUG: Attempting to send email to {owner_email}")
-                            print(f"📧 DEBUG: SMTP_EMAIL = {os.environ.get('SMTP_EMAIL', 'NOT SET')}")
-                            print(f"📧 DEBUG: SMTP_PASSWORD = {'SET' if os.environ.get('SMTP_PASSWORD') else 'NOT SET'}")
-                            
+                            print(f"📧 Attempting to send email to {owner_email}")
                             email_sent = send_security_alert_email(owner_email, alert_msg, link_id)
-                            print(f"📧 DEBUG: Email send result: {email_sent}")
                             print(f"Security alert created for user {owner_id}, email sent: {email_sent}")
                         except Exception as email_error:
-                            print(f"❌ DEBUG: Email send failed with error: {email_error}")
-                            print(f"Failed to send security alert email: {email_error}")
+                            print(f"❌ Email send failed: {email_error}")
             
             conn.commit()
             return {"status": "logged", "total_failures": total_failed_count}
