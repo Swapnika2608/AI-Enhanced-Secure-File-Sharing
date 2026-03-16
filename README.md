@@ -50,13 +50,11 @@ BlindSend combines AES-256 encryption with ensemble machine learning models to p
 
 3. **Configure environment variables**
    ```bash
-   # Create .env file
+   # Create .env file from .env.example
+   DATABASE_URL=postgresql://user:password@host/dbname
    JWT_SECRET=your-secure-secret-key
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_NAME=blindsend_test
-   DB_USER=postgres
-   DB_PASSWORD=your-password
+   RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+   FROM_EMAIL=onboarding@resend.dev
    MAX_FILE_SIZE_MB=100
    ```
 
@@ -115,7 +113,7 @@ BlindSend combines AES-256 encryption with ensemble machine learning models to p
 - **Feature Engineering**: 15+ behavioral metrics (login patterns, IP diversity, failed attempts, etc.)
 - **Risk Scoring**: Multi-factor assessment with confidence levels
 - **Automated Responses**: Account suspension, IP blocking, step-up authentication
-- **Security Alerts**: Email notifications after 3+ failed access attempts
+- **Security Alerts**: Email notifications via Resend API after every 3 failed access attempts (password or decryption key)
 - **Audit Logging**: Complete access history with IP geolocation
 
 ## 📊 API Endpoints
@@ -196,15 +194,19 @@ ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5000
 JWT_SECRET=your-secure-random-secret-key
 MAX_FILE_SIZE_MB=100
 
-# Database
+# Database (use DATABASE_URL for production/Neon/Render)
+DATABASE_URL=postgresql://user:password@host/dbname
+
+# OR individual vars for local development
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=blindsend_test
 DB_USER=postgres
 DB_PASSWORD=your-password
 
-# Email alerts (Resend API)
+# Email alerts (Resend API - https://resend.com)
 RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+FROM_EMAIL=onboarding@resend.dev
 ```
 
 ## 📈 Performance & Limits
@@ -221,10 +223,11 @@ RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
 ### Backend
 - **FastAPI** - Modern async web framework
 - **Uvicorn** - ASGI server
-- **PostgreSQL** - Relational database
+- **PostgreSQL (Neon)** - Serverless relational database
 - **psycopg3** - PostgreSQL adapter
 - **PyJWT** - JWT token handling
 - **bcrypt** - Password hashing
+- **Resend** - Email alert delivery
 
 ### AI/ML Stack
 - **scikit-learn** - Isolation Forest, One-Class SVM
@@ -244,4 +247,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**⚡ Built with zero-knowledge security and AI-powered threat detection**
+**⚡ Built with zero-knowledge security, AI-powered threat detection, and deployed on Render with Neon PostgreSQL**
