@@ -191,6 +191,10 @@ app.add_middleware(
 
 # Serve static files - handle both local and production paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Upload directory - always relative to this file
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 # Debug: Print paths
@@ -325,11 +329,11 @@ async def upload_file_simple(file: UploadFile = File(...)):
     """Simple upload endpoint for encrypted files"""
     try:
         # Create upload directory
-        os.makedirs("uploads", exist_ok=True)
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
         
         # Generate unique file ID
         file_id = str(uuid.uuid4())
-        file_path = f"uploads/{file_id}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, f"{file_id}_{file.filename}")
         
         # Save encrypted file (server never sees plaintext)
         with open(file_path, "wb") as f:
@@ -487,9 +491,9 @@ async def list_server_files():
     """List all encrypted files on server (admin only)"""
     try:
         files = []
-        if os.path.exists("uploads"):
-            for filename in os.listdir("uploads"):
-                file_path = f"uploads/{filename}"
+        if os.path.exists(UPLOAD_DIR):
+            for filename in os.listdir(UPLOAD_DIR):
+                file_path = os.path.join(UPLOAD_DIR, filename)
                 file_size = os.path.getsize(file_path)
                 file_id = filename.split("_")[0]
                 original_name = "_".join(filename.split("_")[1:])
@@ -748,9 +752,9 @@ async def upload_file(
         
         if file_size == 0:
             raise HTTPException(status_code=400, detail="Empty file not allowed")
-        os.makedirs("uploads", exist_ok=True)
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
         link_id = str(uuid.uuid4())
-        file_path = f"uploads/{link_id}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, f"{link_id}_{file.filename}")
         
         with open(file_path, "wb") as f:
             f.write(content)
@@ -955,17 +959,15 @@ async def download_file(link_id: str, request: Request, password: Optional[str] 
             
             conn.commit()
             
-            for filename in os.listdir("uploads"):
+            for filename in os.listdir(UPLOAD_DIR):
                 if filename.startswith(f"{link_id}_"):
-                    # Extract original filename (remove link_id prefix)
                     original_filename = filename.split("_", 1)[1]
-                    # Remove .encrypted extension if present
                     if original_filename.endswith('.encrypted'):
                         original_filename = original_filename[:-10]
                     
                     from urllib.parse import quote
                     return FileResponse(
-                        f"uploads/{filename}",
+                        os.path.join(UPLOAD_DIR, filename),
                         filename=original_filename,
                         media_type='application/octet-stream',
                         headers={
