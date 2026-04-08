@@ -3,6 +3,8 @@ FastAPI Server for Blindsend Frontend
 Provides REST API endpoints for secure file sharing with AI security
 """
 
+from contextlib import asynccontextmanager
+import threading
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
@@ -163,26 +165,29 @@ def get_location_from_ip(ip_address: str) -> str:
         pass
     return "Unknown"
 
-app = FastAPI(title="AI Enhanced Secure File Sharing API", version="1.0.0")
-security = HTTPBearer()
-
-# Initialize AI Security Engine
 ai_engine = None
-if AI_IMPORTS_AVAILABLE:
+
+def _init_ai_background():
+    global ai_engine
+    import time
+    time.sleep(5)  # Wait for server to be fully up
+    if not AI_IMPORTS_AVAILABLE:
+        return
     try:
         os.makedirs("models", exist_ok=True)
         ai_engine = AISecurityEngine(DB_CONFIG)
-        print("AI Security Engine initialized successfully")
-        # Auto-initialize models on startup
-        try:
-            ai_engine.initialize_system(retrain_models=False)
-            print("AI models loaded successfully")
-        except Exception as model_error:
-            print(f"AI models not loaded: {model_error}")
+        ai_engine.initialize_system(retrain_models=False)
+        print("✅ AI Security Engine ready")
     except Exception as e:
-        print(f"AI Security Engine initialization failed: {e}")
-else:
-    print("AI Security Engine disabled - imports not available")
+        print(f"AI init failed: {e}")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    threading.Thread(target=_init_ai_background, daemon=True).start()
+    yield
+
+app = FastAPI(title="AI Enhanced Secure File Sharing API", version="1.0.0", lifespan=lifespan)
+security = HTTPBearer()
 
 # CORS middleware - SECURE: Restrict to specific origins
 ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:5000').split(',')
