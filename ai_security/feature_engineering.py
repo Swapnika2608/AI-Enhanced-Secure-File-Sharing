@@ -6,7 +6,7 @@ Extracts behavioral patterns from Phase 1 audit data for ML analysis
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-import psycopg2
+import psycopg
 from typing import Dict, List, Tuple, Optional
 import json
 from dataclasses import dataclass
@@ -51,13 +51,11 @@ class FeatureEngineer:
     
     def connect_db(self):
         """Connect to PostgreSQL database"""
-        return psycopg2.connect(
-            host=self.db_config['host'],
-            port=self.db_config['port'],
-            database=self.db_config['database'],
-            user=self.db_config['user'],
-            password=self.db_config['password']
-        )
+        db_config = self.db_config.copy()
+        # psycopg3 uses 'dbname', handle both 'database' and 'dbname'
+        if 'database' in db_config:
+            db_config['dbname'] = db_config.pop('database')
+        return psycopg.connect(**db_config)
     
     def extract_user_features(self, user_id: int, days_back: int = 30) -> UserBehaviorFeatures:
         """Extract comprehensive behavioral features for a user"""
@@ -141,7 +139,7 @@ class FeatureEngineer:
         # Access attempts for user's links
         access_query = """
         SELECT aa.ip_address, aa.timestamp, aa.access_type,
-               aa.geolocation, ul.link_id
+               ul.link_id
         FROM access_attempts aa
         JOIN user_links ul ON aa.link_id = ul.link_id
         WHERE ul.user_id = %s 
@@ -169,7 +167,7 @@ class FeatureEngineer:
         device_df = pd.read_sql(device_query, conn, params=[user_id, days_back])
         
         unique_ips = access_df['ip_address'].nunique()
-        unique_locations = access_df['geolocation'].nunique() if 'geolocation' in access_df.columns else 0
+        unique_locations = unique_ips  # Use unique IPs as location proxy
         
         # Device consistency score (higher = more consistent)
         device_consistency = 1.0

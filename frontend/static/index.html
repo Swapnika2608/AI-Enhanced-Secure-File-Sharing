@@ -138,6 +138,7 @@
                 <div class="tab" onclick="showAppTab('activity')">Recent Activity</div>
                 <div class="tab" onclick="showAppTab('analytics')">Analytics</div>
                 <div class="tab" onclick="showAppTab('security')">Security</div>
+                <div class="tab" onclick="showAppTab('ai-report')">🤖 AI Report</div>
             </div>
 
             <!-- Upload Tab -->
@@ -225,6 +226,19 @@
                     </div>
                 </div>
             </div>
+
+            <!-- AI Report Tab -->
+            <div id="ai-report-tab" class="tab-content">
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3>🤖 AI Security Report</h3>
+                        <button class="btn btn-secondary" onclick="loadAIReport()" style="padding: 8px 16px; font-size: 13px;">🔄 Refresh</button>
+                    </div>
+                    <div id="ai-report-content">
+                        <p>Loading AI report...</p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div id="alerts"></div>
@@ -256,6 +270,9 @@
             
             if (tab === 'activity' || tab === 'analytics' || tab === 'security') {
                 loadUserActivity();
+            }
+            if (tab === 'ai-report') {
+                loadAIReport();
             }
         }
 
@@ -793,6 +810,113 @@
             setTimeout(() => {
                 alert.remove();
             }, 5000);
+        }
+
+        async function loadAIReport() {
+            const container = document.getElementById('ai-report-content');
+            container.innerHTML = '<p style="text-align:center; padding: 20px;">⏳ Loading AI analysis...</p>';
+            
+            try {
+                const response = await fetch('/api/ai/security-dashboard', {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                
+                if (!response.ok) {
+                    container.innerHTML = '<p style="color: #dc3545; text-align:center;">❌ AI Engine not available. Visit <a href="/api/ai/initialize">/api/ai/initialize</a> first.</p>';
+                    return;
+                }
+                
+                const data = await response.json();
+                const report = data.system_security_report;
+                const status = data.ai_system_status;
+                
+                if (!report) {
+                    container.innerHTML = '<p style="color: #dc3545;">❌ No report data available</p>';
+                    return;
+                }
+                
+                const dist = report.risk_distribution || {};
+                const total = report.total_users_assessed || 0;
+                const factors = report.top_risk_factors || [];
+                const recommendations = report.recommendations || [];
+
+                const riskColor = (level) => ({
+                    very_low: '#28a745', low: '#17a2b8',
+                    medium: '#ffc107', high: '#fd7e14', critical: '#dc3545'
+                })[level] || '#666';
+
+                const riskIcon = (level) => ({
+                    very_low: '🟢', low: '🔵', medium: '🟡', high: '🟠', critical: '🔴'
+                })[level] || '⚪';
+
+                container.innerHTML = `
+                    <!-- AI Status -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 25px;">
+                        <div class="stat-card" style="border-left-color: #28a745;">
+                            <div class="stat-number" style="color: #28a745; font-size: 20px;">${status.models_trained ? '✅ Active' : '❌ Inactive'}</div>
+                            <div class="stat-label">AI Models</div>
+                        </div>
+                        <div class="stat-card" style="border-left-color: #007bff;">
+                            <div class="stat-number" style="color: #007bff;">${total}</div>
+                            <div class="stat-label">Users Monitored</div>
+                        </div>
+                        <div class="stat-card" style="border-left-color: #6f42c1;">
+                            <div class="stat-number" style="color: #6f42c1;">${status.monitoring_interval / 60} min</div>
+                            <div class="stat-label">Monitor Interval</div>
+                        </div>
+                        <div class="stat-card" style="border-left-color: #dc3545;">
+                            <div class="stat-number" style="color: #dc3545;">${report.high_risk_users?.length || 0}</div>
+                            <div class="stat-label">High Risk Users</div>
+                        </div>
+                    </div>
+
+                    <!-- Risk Distribution -->
+                    <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                        <div class="section-title">📊 Risk Distribution</div>
+                        ${Object.entries(dist).map(([level, count]) => `
+                            <div style="display: flex; align-items: center; gap: 10px; margin: 10px 0;">
+                                <span style="width: 100px; font-size: 13px;">${riskIcon(level)} ${level.replace('_', ' ').toUpperCase()}</span>
+                                <div style="flex: 1; background: #e9ecef; border-radius: 10px; height: 20px; overflow: hidden;">
+                                    <div style="width: ${total > 0 ? (count/total*100) : 0}%; background: ${riskColor(level)}; height: 100%; border-radius: 10px; transition: width 0.5s;"></div>
+                                </div>
+                                <span style="width: 30px; text-align: right; font-weight: bold;">${count}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <!-- Top Risk Factors -->
+                    <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                        <div class="section-title">⚠️ Top Risk Factors</div>
+                        ${factors.map(f => {
+                            const pct = Math.round(f.avg_score * 100);
+                            const color = pct > 70 ? '#dc3545' : pct > 40 ? '#ffc107' : '#28a745';
+                            return `
+                            <div style="margin: 12px 0;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                    <span style="font-size: 13px; font-weight: 500;">${f.factor.replace(/_/g, ' ').toUpperCase()}</span>
+                                    <span style="font-size: 13px; color: ${color}; font-weight: bold;">${pct}%</span>
+                                </div>
+                                <div style="background: #e9ecef; border-radius: 10px; height: 12px; overflow: hidden;">
+                                    <div style="width: ${pct}%; background: ${color}; height: 100%; border-radius: 10px;"></div>
+                                </div>
+                            </div>`;
+                        }).join('')}
+                    </div>
+
+                    <!-- Recommendations -->
+                    ${recommendations.length > 0 ? `
+                    <div style="background: #fff3cd; padding: 20px; border-radius: 10px; border-left: 4px solid #ffc107;">
+                        <div class="section-title" style="color: #856404;">💡 AI Recommendations</div>
+                        ${recommendations.map(r => `<p style="margin: 8px 0; font-size: 13px;">• ${r}</p>`).join('')}
+                    </div>` : ''}
+
+                    <div style="text-align: right; margin-top: 15px; font-size: 12px; color: #999;">
+                        Last updated: ${new Date(report.report_timestamp).toLocaleString()}
+                    </div>
+                `;
+            } catch (error) {
+                container.innerHTML = `<p style="color: #dc3545; text-align:center;">❌ Error loading AI report: ${error.message}</p>`;
+            }
         }
 
         // Drag and drop

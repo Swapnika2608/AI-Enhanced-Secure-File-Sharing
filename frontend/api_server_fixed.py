@@ -170,10 +170,15 @@ security = HTTPBearer()
 ai_engine = None
 if AI_IMPORTS_AVAILABLE:
     try:
-        # Ensure models directory exists
         os.makedirs("models", exist_ok=True)
         ai_engine = AISecurityEngine(DB_CONFIG)
         print("AI Security Engine initialized successfully")
+        # Auto-initialize models on startup
+        try:
+            ai_engine.initialize_system(retrain_models=False)
+            print("AI models loaded successfully")
+        except Exception as model_error:
+            print(f"AI models not loaded: {model_error}")
     except Exception as e:
         print(f"AI Security Engine initialization failed: {e}")
 else:
@@ -325,8 +330,8 @@ async def health_check():
     }
 
 @app.post("/upload")
-async def upload_file_simple(file: UploadFile = File(...)):
-    """Simple upload endpoint for encrypted files"""
+async def upload_file_simple(file: UploadFile = File(...), user_data: dict = Depends(verify_token)):
+    """Simple upload endpoint for encrypted files (requires auth)"""
     try:
         # Create upload directory
         os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -487,8 +492,8 @@ async def download_page(file_id: str):
         """)
 
 @app.get("/admin/files")
-async def list_server_files():
-    """List all encrypted files on server (admin only)"""
+async def list_server_files(user_data: dict = Depends(verify_token)):
+    """List all encrypted files on server (requires auth)"""
     try:
         files = []
         if os.path.exists(UPLOAD_DIR):
@@ -1304,91 +1309,6 @@ async def get_user_threat_analysis(user_id: int, admin_data: dict = Depends(veri
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Threat analysis error: {str(e)}")
-
-@app.get("/api/debug/failures/{link_id}")
-async def debug_failures(link_id: str):
-    """Debug endpoint to check what failure types are being stored"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            
-            # Check all access attempts for this link
-            cursor.execute("""
-                SELECT access_type, success, user_name, timestamp 
-                FROM access_attempts 
-                WHERE link_id = %s 
-                ORDER BY timestamp DESC LIMIT 20
-            """, (link_id,))
-            
-            attempts = cursor.fetchall()
-            
-            # Get failure breakdown
-            cursor.execute("""
-                SELECT access_type, COUNT(*) 
-                FROM access_attempts 
-                WHERE link_id = %s AND success = false 
-                GROUP BY access_type
-            """, (link_id,))
-            
-            breakdown = dict(cursor.fetchall())
-            
-            return {
-                "link_id": link_id,
-                "recent_attempts": [{
-                    "access_type": attempt[0],
-                    "success": attempt[1],
-                    "user_name": attempt[2],
-                    "timestamp": attempt[3].isoformat() if attempt[3] else None
-                } for attempt in attempts],
-                "failure_breakdown": breakdown,
-                "total_failures": sum(breakdown.values())
-            }
-            
-    except Exception as e:
-        return {"error": str(e)}
-
-@app.get("/api/debug/security")
-async def debug_security():
-    """Debug endpoint to check security alerts and access attempts"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            
-            # Check security alerts
-            cursor.execute("SELECT COUNT(*) FROM security_alerts")
-            alerts_count = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT * FROM security_alerts ORDER BY created_at DESC LIMIT 5")
-            recent_alerts = cursor.fetchall()
-            
-            # Check access attempts
-            cursor.execute("SELECT COUNT(*) FROM access_attempts")
-            attempts_count = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT * FROM access_attempts ORDER BY timestamp DESC LIMIT 5")
-            recent_attempts = cursor.fetchall()
-            
-            # Check users
-            cursor.execute("SELECT COUNT(*) FROM users")
-            users_count = cursor.fetchone()[0]
-            
-            return {
-                "security_alerts": {
-                    "count": alerts_count,
-                    "recent": [dict(zip(["id", "user_id", "alert_type", "severity", "message", "link_id", "created_at"], alert)) for alert in recent_alerts]
-                },
-                "access_attempts": {
-                    "count": attempts_count,
-                    "recent": [dict(zip(["id", "link_id", "ip_address", "timestamp", "access_type", "success", "risk_score", "user_name"], attempt)) for attempt in recent_attempts]
-                },
-                "users_count": users_count,
-                "database_connection": "working",
-                "timestamp": datetime.now().isoformat()
-            }
-            
-    except Exception as e:
-        return {"error": str(e)}
-
 
 if __name__ == "__main__":
     import uvicorn
