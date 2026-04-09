@@ -3,7 +3,7 @@ Automated Response System for AI Security Engine
 Takes automated security actions based on threat detection and risk scores
 """
 
-import psycopg2
+import psycopg
 import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
@@ -62,13 +62,10 @@ class AutomatedResponseSystem:
     
     def connect_db(self):
         """Connect to PostgreSQL database"""
-        return psycopg2.connect(
-            host=self.db_config['host'],
-            port=self.db_config['port'],
-            database=self.db_config['database'],
-            user=self.db_config['user'],
-            password=self.db_config['password']
-        )
+        db_config = self.db_config.copy()
+        if 'database' in db_config:
+            db_config['dbname'] = db_config.pop('database')
+        return psycopg.connect(**db_config)
     
     def process_threat_detection(self, risk_assessment: Dict, context: Dict = None) -> List[SecurityResponse]:
         """Process threat detection and determine appropriate responses"""
